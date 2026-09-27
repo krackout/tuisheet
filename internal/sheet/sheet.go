@@ -891,14 +891,6 @@ func isDiv0Error(err error) bool {
 	return strings.Contains(s, "#DIV/0!") || strings.Contains(s, "division by zero") || strings.Contains(s, "MOD by zero")
 }
 
-func parseNumber(value string) (float64, error) {
-	v := parseValue(value)
-	if v.Type == valNumber {
-		return v.Num, nil
-	}
-	return 0, strconv.ErrSyntax
-}
-
 func splitFormulaArgs(args string) []string {
 	parts := splitTopLevel(args, ',')
 	if len(parts) == 1 {

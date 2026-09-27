@@ -91,9 +91,6 @@ func (a *app) enterSaveAsMode() {
 	// reuse file browser for directory picking
 	if a.currentFile != "" {
 		a.fileDir = filepath.Dir(a.currentFile)
-		if a.fileDir == "" || a.fileDir == "." {
-			// keep as "." for relative
-		}
 	}
 	if a.fileDir == "" {
 		a.fileDir = "."
@@ -282,12 +279,7 @@ func scrollbarGlyphs(total, windowSize, offset int) []string {
 }
 
 func (a *app) withFileBrowserPopup(lines []string) []string {
-	boxW := max(44, a.width*7/10)
-	if boxW > a.width-2 {
-		boxW = a.width - 2
-	}
-	boxX := (a.width - boxW) / 2
-	innerW := boxW - 2
+	boxX, boxW, innerW := a.popupBoxWidth(7, 44)
 
 	// Build inner content (sans borders)
 	var content []string
@@ -327,7 +319,7 @@ func (a *app) withFileBrowserPopup(lines []string) []string {
 	}
 	filterLower := strings.ToLower(filter)
 	for i, e := range visible {
-		line := "  "
+		var line string
 		if offset+i == a.fileCursor {
 			line = "> "
 		} else {
@@ -348,11 +340,7 @@ func (a *app) withFileBrowserPopup(lines []string) []string {
 	}
 
 	innerH := len(content)
-	boxH := innerH + 2 // +2 for top/bottom borders
-	if boxH > a.height {
-		boxH = a.height
-	}
-	boxY := max(0, (a.height-boxH)/2)
+	boxY, boxH := a.popupBoxHeight(innerH)
 
 	// Proportional scrollbar alongside the entry list (index 0 is the
 	// directory header, which keeps the full inner width).

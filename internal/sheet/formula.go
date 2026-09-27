@@ -720,29 +720,10 @@ func (p *parser) peek() byte {
 	return p.text[p.pos]
 }
 
-func (p *parser) next() byte {
-	p.skipWS()
-	if p.pos >= len(p.text) {
-		return 0
-	}
-	b := p.text[p.pos]
-	p.pos++
-	return b
-}
-
 func (p *parser) match(b byte) bool {
 	if p.peek() == b {
 		p.pos++
 		p.skipWS()
-		return true
-	}
-	return false
-}
-
-func (p *parser) matchStr(s string) bool {
-	p.skipWS()
-	if p.pos+len(s) <= len(p.text) && p.text[p.pos:p.pos+len(s)] == s {
-		p.pos += len(s)
 		return true
 	}
 	return false
@@ -1373,17 +1354,6 @@ func (s *Sheet) arrayTexts(v Value) []string {
 				out = append(out, strconv.FormatFloat(cell.Num, 'f', -1, 64))
 			}
 		}
-	}
-	return out
-}
-
-func (s *Sheet) flatArrayValues(v Value) []Value {
-	if v.Type != valArray {
-		return nil
-	}
-	var out []Value
-	for _, row := range v.Arr {
-		out = append(out, row...)
 	}
 	return out
 }

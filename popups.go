@@ -100,19 +100,10 @@ func (a *app) withUndoHistoryPopup(lines []string) []string {
 	if !hasItems {
 		comments = []string{"(no history)"}
 	}
-	boxW := max(44, a.width*7/10)
-	if boxW > a.width-2 {
-		boxW = a.width - 2
-	}
-	boxX := (a.width - boxW) / 2
-	innerW := boxW - 2
+	boxX, boxW, innerW := a.popupBoxWidth(7, 44)
 
 	innerH := len(comments)
-	boxH := innerH + 2
-	if boxH > a.height {
-		boxH = a.height
-	}
-	boxY := max(0, (a.height-boxH)/2)
+	boxY, boxH := a.popupBoxHeight(innerH)
 
 	for row := boxY; row < boxY+boxH && row < len(lines); row++ {
 		i := row - boxY
@@ -236,18 +227,9 @@ func (a *app) renderScrollablePopup(lines []string, title string, content []stri
 }
 
 func (a *app) renderSimpleBox(lines []string, content []string) {
-	boxW := max(44, a.width*7/10)
-	if boxW > a.width-2 {
-		boxW = a.width - 2
-	}
-	boxX := (a.width - boxW) / 2
-	innerW := boxW - 2
+	boxX, boxW, innerW := a.popupBoxWidth(7, 44)
 	innerH := len(content)
-	boxH := innerH + 2
-	if boxH > a.height {
-		boxH = a.height
-	}
-	boxY := max(0, (a.height-boxH)/2)
+	boxY, boxH := a.popupBoxHeight(innerH)
 	for i := range content {
 		content[i] = fitDisplay(content[i], innerW)
 	}
@@ -393,7 +375,7 @@ func (a *app) withGeneralHelpPopup(lines []string) []string {
 		" On the north east corner of the screen, there are labels.",
 		" They represent the current state of the programme,",
 		" eg READY, EDIT etc. Also FROZEN is shown as a secondary",
-		" label when there are titles/frozen cells.", 
+		" label when there are titles/frozen cells.",
 		"",
 		" More help:",
 		" Undo-redo specific help is available from the menu:",

@@ -251,20 +251,6 @@ func (a *app) switchSheet(delta int) {
 	a.message = "Sheet " + a.sheetNames[newIdx]
 }
 
-func (a *app) setActiveSheet(index int) {
-	if index < 0 || index >= len(a.sheets) {
-		return
-	}
-	a.activeSheet = index
-	a.sheet = a.sheets[index]
-	a.active = sheet.Coord{}
-	a.rowOffset = 0
-	a.colOffset = 0
-	a.ensureSheetVisible()
-	a.mode = modeNormal
-	a.message = "Sheet " + a.sheetNames[index]
-}
-
 func (a *app) ensureSheetVisible() {
 	if len(a.sheetNames) <= 1 {
 		a.tabOffset = 0
@@ -450,21 +436,6 @@ func (a *app) visibleRows(s *sheet.Sheet, rOff int, availRows int) []int {
 		}
 	}
 	return vr
-}
-
-func (a *app) nextVisibleRow(s *sheet.Sheet, row int, step int) int {
-	for {
-		row += step
-		if row < 0 {
-			return 0
-		}
-		if row >= sheet.MaxRows {
-			return sheet.MaxRows - 1
-		}
-		if !s.IsRowHidden(row) {
-			return row
-		}
-	}
 }
 
 func (a *app) spanWidth(s *sheet.Sheet, vc []int, ci, span int) int {
@@ -819,9 +790,6 @@ func (a *app) inputStatusLine(prefix, input string, cursor int) string {
 	}
 	hi := min(len(runes), lo+runesCols)
 	hasRight := hi < len(runes)
-	if !hasRight {
-		runesCols += indW
-	}
 	var b strings.Builder
 	if hasLeft {
 		b.WriteString("< ")
@@ -848,7 +816,6 @@ func (a *app) inputStatusLine(prefix, input string, cursor int) string {
 	}
 	if caretAtEnd && used < budgetContent {
 		b.WriteString(style(sgrReverseVideo, " "))
-		used++
 	}
 	if hasRight {
 		b.WriteString(" >")
@@ -896,9 +863,6 @@ func (a *app) inputPromptLine(prefix, input string, cursor int) string {
 	}
 	hi := min(len(runes), lo+runesCols)
 	hasRight := hi < len(runes)
-	if !hasRight {
-		runesCols += indW
-	}
 	var b strings.Builder
 	if hasLeft {
 		b.WriteString("< ")
@@ -925,7 +889,6 @@ func (a *app) inputPromptLine(prefix, input string, cursor int) string {
 	}
 	if caretAtEnd && used < budgetContent {
 		b.WriteString(style(sgrReverseVideo, " "))
-		used++
 	}
 	if hasRight {
 		b.WriteString(" >")
@@ -984,9 +947,6 @@ func (a *app) editStatusLeft(budget int) string {
 	}
 	hi := min(len(runes), lo+runesCols)
 	hasRight := hi < len(runes)
-	if !hasRight {
-		runesCols += indW // right marker freed
-	}
 
 	var b strings.Builder
 	if hasLeft {
@@ -1015,7 +975,6 @@ func (a *app) editStatusLeft(budget int) string {
 	// Cursor at end of buffer: a reversed blank as the caret.
 	if caretAtEnd && used < budgetContent {
 		b.WriteString(style(sgrReverseVideo, " "))
-		used++
 	}
 	if hasRight {
 		b.WriteString(" >")
@@ -1133,7 +1092,6 @@ func (a *app) gridLines() []string {
 		// if scrollRows empty due to offset, still show frozen
 		if frozenH > rows {
 			frozenRows = frozenRows[:rows]
-			frozenH = rows
 			scrollRows = nil
 		}
 		lines := make([]string, 0, rows+1)
@@ -1715,14 +1673,33 @@ func truncateDisplay(s string, width int) string {
 	return out.String()
 }
 
-func (a *app) popupBoxMetrics(pct, minW, innerH int) (boxX, boxY, boxW, innerW, boxH int) {
+// popupBoxWidth centers a popup pct tenths of screen width wide (at least
+// minW, clamped to the screen); returns boxX, boxW, innerW.
+func (a *app) popupBoxWidth(pct, minW int) (boxX, boxW, innerW int) {
 	boxW = max(minW, a.width*pct/10)
 	if boxW > a.width-2 {
 		boxW = a.width - 2
 	}
 	boxX = (a.width - boxW) / 2
 	innerW = boxW - 2
-	boxH = innerH + 2
+	return
+}
+
+// popupBoxWidthCapped is popupBoxWidth for fixed-width popups: at least
+// minW, at most maxW.
+func (a *app) popupBoxWidthCapped(minW, maxW int) (boxX, boxW, innerW int) {
+	boxW = max(minW, min(maxW, a.width-4))
+	if boxW > a.width-2 {
+		boxW = a.width - 2
+	}
+	boxX = (a.width - boxW) / 2
+	innerW = boxW - 2
+	return
+}
+
+// popupBoxHeight clamps the content height to the screen; returns boxY, boxH.
+func (a *app) popupBoxHeight(innerH int) (boxY, boxH int) {
+	boxH = innerH + 2 // +2 for top/bottom borders
 	if boxH > a.height {
 		boxH = a.height
 	}

@@ -1493,11 +1493,7 @@ func (a *app) handleSheetMoveKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (a *app) handleSheetMoveClick(x, y int) bool {
-	boxW := max(36, min(50, a.width-4))
-	if boxW > a.width-2 {
-		boxW = a.width - 2
-	}
-	boxX := (a.width - boxW) / 2
+	boxX, boxW, _ := a.popupBoxWidthCapped(36, 50)
 	innerH := len(a.sheetNames) + 3 // title + blank + sheets + blank + hint + borders
 	boxH := innerH + 2
 	boxY := max(0, (a.height-boxH)/2)
@@ -2930,8 +2926,6 @@ func (a *app) localeSeparators() (string, string) { return locale.Separators() }
 
 func (a *app) localeInfo() (string, string) { return locale.Currency() }
 
-func (a *app) localeTag() string { return locale.Tag() }
-
 func (a *app) deleteSheet(index int) {
 	if len(a.sheets) <= 1 {
 		a.message = "Cannot delete the last sheet"
@@ -3151,12 +3145,7 @@ func (a *app) sheetIndexAt(x int) (int, bool) {
 
 func (a *app) withSortPopup(lines []string) []string {
 	title := fmt.Sprintf(" Sort Options - Range: %s ", a.sortRange.Start.String()+":"+a.sortRange.End.String())
-	boxW := max(48, a.width*7/10)
-	if boxW > a.width-2 {
-		boxW = a.width - 2
-	}
-	boxX := (a.width - boxW) / 2
-	innerW := boxW - 2
+	boxX, boxW, innerW := a.popupBoxWidth(7, 48)
 	// Build content lines
 	var content []string
 	content = append(content, style(sgrReverseVideo, fitDisplay(title, innerW)))
@@ -3168,7 +3157,7 @@ func (a *app) withSortPopup(lines []string) []string {
 		primaryField = style(sgrTealBand, fitDisplay(primaryField, innerW))
 	}
 	content = append(content, primaryField)
-	primaryAsc := "   Order:  ( ) Ascending   ( ) Descending"
+	var primaryAsc string
 	if a.sortPrimaryAsc {
 		primaryAsc = "   Order:  (•) Ascending   ( ) Descending"
 	} else {
@@ -3185,7 +3174,7 @@ func (a *app) withSortPopup(lines []string) []string {
 		secondaryField = style(sgrTealBand, fitDisplay(secondaryField, innerW))
 	}
 	content = append(content, secondaryField)
-	secondaryAsc := "   Order:  ( ) Ascending   ( ) Descending"
+	var secondaryAsc string
 	if a.sortSecondaryAsc {
 		secondaryAsc = "   Order:  (•) Ascending   ( ) Descending"
 	} else {
@@ -3202,11 +3191,7 @@ func (a *app) withSortPopup(lines []string) []string {
 	content = append(content, style(sgrItalic, " Tip: leave Secondary empty for single-key sort"))
 	// Render box
 	innerH := len(content)
-	boxH := innerH + 2
-	if boxH > a.height {
-		boxH = a.height
-	}
-	boxY := max(0, (a.height-boxH)/2)
+	boxY, boxH := a.popupBoxHeight(innerH)
 	for i := range content {
 		content[i] = fitDisplay(content[i], innerW)
 	}
@@ -3234,17 +3219,12 @@ func (a *app) withSortPopup(lines []string) []string {
 
 func (a *app) withSheetMovePopup(lines []string) []string {
 	title := " Move Sheet — Up/Down moves, Enter confirms, Esc cancels "
-	boxW := max(36, min(50, a.width-4))
-	if boxW > a.width-2 {
-		boxW = a.width - 2
-	}
-	boxX := (a.width - boxW) / 2
-	innerW := boxW - 2
+	boxX, boxW, innerW := a.popupBoxWidthCapped(36, 50)
 	var content []string
 	content = append(content, style(sgrReverseVideo, fitDisplay(title, innerW)))
 	content = append(content, "")
 	for i, name := range a.sheetNames {
-		line := "  " + name + "  "
+		var line string
 		if i == a.sheetMoveIdx {
 			line = style(sgrTealBand, fitDisplay("▶ "+name, innerW))
 		} else {
@@ -3255,11 +3235,7 @@ func (a *app) withSheetMovePopup(lines []string) []string {
 	content = append(content, "")
 	content = append(content, " [Enter] Confirm   [Esc] Cancel ")
 	innerH := len(content)
-	boxH := innerH + 2
-	if boxH > a.height {
-		boxH = a.height
-	}
-	boxY := max(0, (a.height-boxH)/2)
+	boxY, boxH := a.popupBoxHeight(innerH)
 	for i := range content {
 		content[i] = fitDisplay(content[i], innerW)
 	}

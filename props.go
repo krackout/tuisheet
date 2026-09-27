@@ -477,12 +477,7 @@ func (a *app) withPropertiesPopup(lines []string) []string {
 }
 
 func (a *app) withPropertiesEditPopup(lines []string) []string {
-	boxW := max(56, a.width*7/10)
-	if boxW > a.width-2 {
-		boxW = a.width - 2
-	}
-	boxX := (a.width - boxW) / 2
-	innerW := boxW - 2
+	boxX, boxW, innerW := a.popupBoxWidth(7, 56)
 	title := " Edit Properties "
 	var content []string
 	content = append(content, "")
@@ -520,11 +515,7 @@ func (a *app) withPropertiesEditPopup(lines []string) []string {
 	content = append(content, "")
 	content = append(content, fitDisplay(" Tab/Up/Down switch field  Enter/Ctrl+S save  Esc cancel", innerW))
 	innerH := len(content)
-	boxH := innerH + 2
-	if boxH > a.height {
-		boxH = a.height
-	}
-	boxY := max(0, (a.height-boxH)/2)
+	boxY, boxH := a.popupBoxHeight(innerH)
 	for i := range content {
 		content[i] = fitDisplay(content[i], innerW)
 	}

@@ -162,12 +162,7 @@ func (a *app) handleSearchResultsKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (a *app) withSearchResultsPopup(lines []string) []string {
-	boxW := max(44, a.width*8/10)
-	if boxW > a.width-2 {
-		boxW = a.width - 2
-	}
-	boxX := (a.width - boxW) / 2
-	innerW := boxW - 2
+	boxX, boxW, innerW := a.popupBoxWidth(8, 44)
 	title := " Search - Enter to go to result - Ctrl+F to come back to these results "
 	if displayWidth(title) > innerW {
 		title = truncateDisplay(title, innerW)
@@ -218,11 +213,7 @@ func (a *app) withSearchResultsPopup(lines []string) []string {
 		content = append(content, " (no results)")
 	}
 	innerH := len(content)
-	boxH := innerH + 2
-	if boxH > a.height {
-		boxH = a.height
-	}
-	boxY := max(0, (a.height-boxH)/2)
+	boxY, boxH := a.popupBoxHeight(innerH)
 	bar := scrollbarGlyphs(len(a.searchResults), scrollWindow, a.searchScroll)
 	// Apply scrollbar: first content line is title (no bar), rest get bar glyph
 	for j := 1; j < len(content); j++ {

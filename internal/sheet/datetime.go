@@ -336,8 +336,6 @@ func applyNumberFormat(v Value, format string) string {
 	return s
 }
 
-func localeTag() string { return locale.Tag() }
-
 func localeSeparators() (string, string) { return locale.Separators() }
 
 func localeCurrency() (string, string) { return locale.Currency() }
