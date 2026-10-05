@@ -399,7 +399,7 @@ func (a *app) colW(s *sheet.Sheet, col int) int {
 	return a.defaultColWidth
 }
 
-func (a *app) visibleCols(s *sheet.Sheet, cOff int, availPx int) []int {
+func (a *app) visibleCols(s *sheet.Sheet, cOff int, availPx int) ([]int, int) {
 	var vc []int
 	used := 0
 	col := cOff
@@ -417,7 +417,19 @@ func (a *app) visibleCols(s *sheet.Sheet, cOff int, availPx int) []int {
 			break
 		}
 	}
-	return vc
+	// Trailing partial column: fill the east end to the screen edge,
+	// truncating the next visible column to the remaining cells.
+	partialW := 0
+	if rest := availPx - used; rest >= 1 {
+		for c := col; c < sheet.MaxColumns; c++ {
+			if !s.IsColHidden(c) {
+				vc = append(vc, c)
+				partialW = rest
+				break
+			}
+		}
+	}
+	return vc, partialW
 }
 
 func (a *app) visibleRows(s *sheet.Sheet, rOff int, availRows int) []int {
@@ -438,10 +450,21 @@ func (a *app) visibleRows(s *sheet.Sheet, rOff int, availRows int) []int {
 	return vr
 }
 
-func (a *app) spanWidth(s *sheet.Sheet, vc []int, ci, span int) int {
+// colWidthVC returns the on-screen width of vc[ci]: the truncated partialW
+// for the trailing partial column, else the full column width.
+func (a *app) colWidthVC(s *sheet.Sheet, vc []int, ci, partialW int) int {
+	if partialW > 0 && ci == len(vc)-1 {
+		return partialW
+	}
+	return a.colW(s, vc[ci])
+}
+
+// spanWidthVC sums on-screen widths like spanWidth, clamping a merge span
+// that reaches the trailing partial column.
+func (a *app) spanWidthVC(s *sheet.Sheet, vc []int, ci, span, partialW int) int {
 	total := 0
 	for i := 0; i < span && ci+i < len(vc); i++ {
-		total += a.colW(s, vc[ci+i])
+		total += a.colWidthVC(s, vc, ci+i, partialW)
 	}
 	return max(1, total)
 }
@@ -523,7 +546,9 @@ func (a *app) ensureVisible() {
 		if fc > 0 && a.viewMode == viewNormal {
 			w = effectivePx
 		}
-		return len(a.visibleCols(a.sheet, cOff, max(1, w)))
+		// Paging counts the trailing partial column as well.
+		vc, _ := a.visibleCols(a.sheet, cOff, max(1, w))
+		return len(vc)
 	}
 	fitRows := func(rOff int) int {
 		r := rows
@@ -1081,7 +1106,7 @@ func (a *app) gridLines() []string {
 		if scrollW < 1 {
 			scrollW = 1
 		}
-		scrollCols := a.visibleCols(a.sheet, a.colOffset, scrollW)
+		scrollCols, partialW := a.visibleCols(a.sheet, a.colOffset, scrollW)
 		vc := append(append([]int{}, frozenCols...), scrollCols...)
 		frozenH := len(frozenRows)
 		scrollH := rows - frozenH
@@ -1097,11 +1122,11 @@ func (a *app) gridLines() []string {
 		lines := make([]string, 0, rows+1)
 		var header strings.Builder
 		header.WriteString(style(sgrTealBand, strings.Repeat(" ", rowHeaderWidth)))
-		for _, col := range vc {
+		for ci, col := range vc {
 			if col == a.active.Col {
-				header.WriteString(style(sgrBlueBand, center(sheet.ColumnName(col), a.colW(a.sheet, col))))
+				header.WriteString(style(sgrBlueBand, center(sheet.ColumnName(col), a.colWidthVC(a.sheet, vc, ci, partialW))))
 			} else {
-				header.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colW(a.sheet, col))))
+				header.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colWidthVC(a.sheet, vc, ci, partialW))))
 			}
 		}
 		lines = append(lines, fitDisplay(header.String(), a.width))
@@ -1120,10 +1145,10 @@ func (a *app) gridLines() []string {
 			for ci, col := range vc {
 				cell := sheet.Coord{Row: row, Col: col}
 				if a.sheet.CoveredByMerge(cell) {
-					line.WriteString(fit("", a.colW(a.sheet, col)))
+					line.WriteString(fit("", a.colWidthVC(a.sheet, vc, ci, partialW)))
 					continue
 				}
-				width := a.colW(a.sheet, col)
+				width := a.colWidthVC(a.sheet, vc, ci, partialW)
 				// merged width across vc (handle span within combined vc)
 				if m, ok := a.sheet.MergeAt(cell); ok && m.Start == cell {
 					span := 0
@@ -1135,7 +1160,7 @@ func (a *app) gridLines() []string {
 						}
 					}
 					if span > 1 {
-						width = a.spanWidth(a.sheet, vc, ci, span)
+						width = a.spanWidthVC(a.sheet, vc, ci, span, partialW)
 					}
 				}
 				cellStyle := a.sheet.Style(cell)
@@ -1156,16 +1181,16 @@ func (a *app) gridLines() []string {
 		}
 		return lines
 	}
-	vc := a.visibleCols(a.sheet, a.colOffset, max(1, a.width-rowHeaderWidth))
+	vc, partialW := a.visibleCols(a.sheet, a.colOffset, max(1, a.width-rowHeaderWidth))
 	vr := a.visibleRows(a.sheet, a.rowOffset, rows)
 	lines := make([]string, 0, rows+1)
 	var header strings.Builder
 	header.WriteString(style(sgrTealBand, strings.Repeat(" ", rowHeaderWidth)))
-	for _, col := range vc {
+	for ci, col := range vc {
 		if col == a.active.Col {
-			header.WriteString(style(sgrBlueBand, center(sheet.ColumnName(col), a.colW(a.sheet, col))))
+			header.WriteString(style(sgrBlueBand, center(sheet.ColumnName(col), a.colWidthVC(a.sheet, vc, ci, partialW))))
 		} else {
-			header.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colW(a.sheet, col))))
+			header.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colWidthVC(a.sheet, vc, ci, partialW))))
 		}
 	}
 	lines = append(lines, fitDisplay(header.String(), a.width))
@@ -1186,10 +1211,10 @@ func (a *app) gridLines() []string {
 				if merge, ok := a.sheet.MergeAt(cell); ok && merge.Start.Row == row && merge.Start.Col >= a.colOffset {
 					continue
 				}
-				line.WriteString(fit("", a.colW(a.sheet, col)))
+				line.WriteString(fit("", a.colWidthVC(a.sheet, vc, ci, partialW)))
 				continue
 			}
-			width := a.cellDisplayWidth(cell, vc, ci)
+			width := a.cellDisplayWidth(cell, vc, ci, partialW)
 			cellStyle := a.sheet.Style(cell)
 			value := alignText(a.sheet.Display(cell), width, cellStyle.Align)
 			if cell == a.active {
@@ -1218,14 +1243,14 @@ func (a *app) perspectiveLines() []string {
 		s := a.sheets[si]
 		rOff, cOff := a.sheetOffset(si)
 		indent := (len(show) - 1 - band) * 2
-		vc := a.visibleCols(s, cOff, max(1, a.width-rowHeaderWidth-indent))
+		vc, partialW := a.visibleCols(s, cOff, max(1, a.width-rowHeaderWidth-indent))
 		pad := strings.Repeat(" ", indent)
 		var hdr strings.Builder
 		hdr.WriteString(pad)
 		label := fit(a.sheetNames[si], rowHeaderWidth)
 		hdr.WriteString(style(sgrTealBand, label))
-		for _, col := range vc {
-			hdr.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colW(s, col))))
+		for ci, col := range vc {
+			hdr.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colWidthVC(s, vc, ci, partialW))))
 		}
 		lines = append(lines, fitDisplay(hdr.String(), a.width))
 		for r := 0; r < perBand; r++ {
@@ -1244,14 +1269,14 @@ func (a *app) perspectiveLines() []string {
 					if merge, ok := s.MergeAt(cell); ok && merge.Start.Row == row && merge.Start.Col >= cOff {
 						continue
 					}
-					line.WriteString(fit("", a.colW(s, col)))
+					line.WriteString(fit("", a.colWidthVC(s, vc, ci, partialW)))
 					continue
 				}
 				merge, ok := s.MergeAt(cell)
-				width := a.colW(s, col)
+				width := a.colWidthVC(s, vc, ci, partialW)
 				if ok && merge.Start == cell && merge.Start.Row == cell.Row {
 					span := min(merge.ColSpan(), len(vc)-ci)
-					width = a.spanWidth(s, vc, ci, span)
+					width = a.spanWidthVC(s, vc, ci, span, partialW)
 				}
 				cs := s.Style(cell)
 				val := alignText(s.Display(cell), width, cs.Align)
@@ -1279,12 +1304,12 @@ func (a *app) horizontalLines() []string {
 		}
 		s := a.sheets[si]
 		rOff, cOff := a.sheetOffset(si)
-		vc := a.visibleCols(s, cOff, max(1, a.width-rowHeaderWidth))
+		vc, partialW := a.visibleCols(s, cOff, max(1, a.width-rowHeaderWidth))
 		var hdr strings.Builder
 		label := fit(a.sheetNames[si], rowHeaderWidth)
 		hdr.WriteString(style(sgrTealBand, label))
-		for _, col := range vc {
-			hdr.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colW(s, col))))
+		for ci, col := range vc {
+			hdr.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colWidthVC(s, vc, ci, partialW))))
 		}
 		lines = append(lines, fitDisplay(hdr.String(), a.width))
 		for r := 0; r < perBand; r++ {
@@ -1302,14 +1327,14 @@ func (a *app) horizontalLines() []string {
 					if merge, ok := s.MergeAt(cell); ok && merge.Start.Row == row && merge.Start.Col >= cOff {
 						continue
 					}
-					line.WriteString(fit("", a.colW(s, col)))
+					line.WriteString(fit("", a.colWidthVC(s, vc, ci, partialW)))
 					continue
 				}
 				merge, ok := s.MergeAt(cell)
-				width := a.colW(s, col)
+				width := a.colWidthVC(s, vc, ci, partialW)
 				if ok && merge.Start == cell && merge.Start.Row == cell.Row {
 					span := min(merge.ColSpan(), len(vc)-ci)
-					width = a.spanWidth(s, vc, ci, span)
+					width = a.spanWidthVC(s, vc, ci, span, partialW)
 				}
 				cs := s.Style(cell)
 				val := alignText(s.Display(cell), width, cs.Align)
@@ -1339,11 +1364,11 @@ func (a *app) verticalLines() []string {
 		}
 		s := a.sheets[si]
 		_, cOff := a.sheetOffset(si)
-		vc := a.visibleCols(s, cOff, panePx)
+		vc, partialW := a.visibleCols(s, cOff, panePx)
 		label := fit(a.sheetNames[si], rowHeaderWidth)
 		hdr.WriteString(style(sgrTealBand, label))
-		for _, col := range vc {
-			hdr.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colW(s, col))))
+		for ci, col := range vc {
+			hdr.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colWidthVC(s, vc, ci, partialW))))
 		}
 	}
 	lines = append(lines, fitDisplay(hdr.String(), a.width))
@@ -1356,7 +1381,7 @@ func (a *app) verticalLines() []string {
 			}
 			s := a.sheets[si]
 			rOff, cOff := a.sheetOffset(si)
-			vc := a.visibleCols(s, cOff, panePx)
+			vc, partialW := a.visibleCols(s, cOff, panePx)
 			row := rOff + r
 			rowHdr := fmt.Sprintf("%*d ", rowHeaderWidth-1, row+1)
 			if si == a.activeSheet && row == a.active.Row {
@@ -1370,14 +1395,14 @@ func (a *app) verticalLines() []string {
 					if merge, ok := s.MergeAt(cell); ok && merge.Start.Row == row && merge.Start.Col >= cOff {
 						continue
 					}
-					line.WriteString(fit("", a.colW(s, col)))
+					line.WriteString(fit("", a.colWidthVC(s, vc, ci, partialW)))
 					continue
 				}
 				merge, ok := s.MergeAt(cell)
-				width := a.colW(s, col)
+				width := a.colWidthVC(s, vc, ci, partialW)
 				if ok && merge.Start == cell && merge.Start.Row == cell.Row {
 					span := min(merge.ColSpan(), len(vc)-ci)
-					width = a.spanWidth(s, vc, ci, span)
+					width = a.spanWidthVC(s, vc, ci, span, partialW)
 				}
 				cs := s.Style(cell)
 				val := alignText(s.Display(cell), width, cs.Align)
@@ -1395,13 +1420,13 @@ func (a *app) verticalLines() []string {
 	return lines
 }
 
-func (a *app) cellDisplayWidth(cell sheet.Coord, vc []int, ci int) int {
+func (a *app) cellDisplayWidth(cell sheet.Coord, vc []int, ci, partialW int) int {
 	merge, ok := a.sheet.MergeAt(cell)
 	if !ok || merge.Start != cell || merge.Start.Row != cell.Row {
-		return a.colW(a.sheet, cell.Col)
+		return a.colWidthVC(a.sheet, vc, ci, partialW)
 	}
 	span := min(merge.ColSpan(), len(vc)-ci)
-	return a.spanWidth(a.sheet, vc, ci, span)
+	return a.spanWidthVC(a.sheet, vc, ci, span, partialW)
 }
 
 func (a *app) messageLine() string {
@@ -1443,9 +1468,9 @@ func (a *app) messageLine() string {
 	if a.currentFile != "" {
 		fn := filepath.Base(a.currentFile)
 		fileTag := style(sgrReverseVideo, " "+fn+" ")
-		return fit(fileTag+" "+style(sgrBold, msg), a.width)
+		return fitDisplay(fileTag+" "+style(sgrBold, msg), a.width)
 	}
-	return fit(style(sgrBold, msg), a.width)
+	return fitDisplay(style(sgrBold, msg), a.width)
 }
 
 func (a *app) gridTop() int {
@@ -1577,8 +1602,25 @@ func overlayPlain(base, overlay string, col, width int) string {
 		base = fitDisplay(base, col+width)
 	}
 	start := displayByteOffset(base, col)
+	prefix := base[:start]
+	if displayWidth(prefix) > col {
+		// A wide rune straddles the cut: dropping it keeps the total
+		// width exact; the overlay covers its cells. Without this the
+		// line grows by one, wraps, and shifts the whole screen below.
+		_, size := utf8.DecodeLastRuneInString(prefix)
+		if size > 0 {
+			prefix = prefix[:len(prefix)-size] + " "
+		}
+	}
 	end := displayByteOffset(base, col+width)
-	return base[:start] + "\x1b[0m" + overlay + base[end:]
+	tail := base[end:]
+	if end > 0 && displayWidth(base[:end]) > col+width {
+		// Same straddle at the far edge: the split wide rune ends
+		// exactly at end, so the tail starts one cell late; pad its
+		// second half to keep the total width exact.
+		tail = " " + tail
+	}
+	return prefix + "\x1b[0m" + overlay + tail
 }
 
 func displayByteOffset(s string, col int) int {
@@ -1653,9 +1695,13 @@ func truncateDisplay(s string, width int) string {
 			continue
 		}
 		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			// Copy both bytes: leaving '[' for the next iteration
+			// would end the escape early ('[' is in '@'-'~') and the
+			// SGR parameters would be counted as visible cells.
 			inEscape = true
 			out.WriteByte(s[i])
-			i++
+			out.WriteByte(s[i+1])
+			i += 2
 			continue
 		}
 		r, size := utf8.DecodeRuneInString(s[i:])

@@ -14,6 +14,85 @@ To quit, / Q
 
 - Mouse can be used to click to cells. Right click is available in cells, rows, columns and sheets/tabs bar.
 
+**Supported formulas:**  
+
+| Function | Description |
+|---|---|
+| ABS | Absolute value |
+| AND | TRUE if all arguments are true |
+| AVERAGE | Arithmetic mean of values |
+| AVERAGEIF | Mean of cells matching a criteria |
+| COLUMN | Column number of a reference |
+| COUNT | Count of numeric values |
+| COUNTA | Count of non-empty values |
+| COUNTIF | Count of cells matching a criteria |
+| COUNTIFS | Count matching multiple criteria pairs |
+| DATE | Date serial from year, month, day |
+| DAY | Day of month of a date serial |
+| DAYS | Days between two dates |
+| EXACT | Case-sensitive text comparison |
+| EXP | e raised to a power |
+| FIND | Position of text within text |
+| HLOOKUP | Horizontal lookup in first table row |
+| IF | Value depending on a condition |
+| IFS | First matching condition's value |
+| INDEX | Value at row/column inside a range |
+| INT | Round down to integer |
+| IPMT | Interest portion of a loan payment |
+| ISBLANK | TRUE if the cell is empty |
+| ISERROR | TRUE if the expression fails |
+| ISNUMBER | TRUE if the value is a number |
+| ISTEXT | TRUE if the value is text |
+| LEFT | First characters of text |
+| LEN | Length of text in characters |
+| LN | Natural logarithm |
+| LOWER | Text converted to lowercase |
+| MATCH | Position of a value in a range |
+| MAX | Largest numeric value |
+| MID | Substring by start and length |
+| MIN | Smallest numeric value |
+| MOD | Remainder with sign of divisor |
+| MONTH | Month of a date serial |
+| NOT | Logical negation |
+| NOW | Current date and time serial |
+| OR | TRUE if any argument is true |
+| PI | The number pi |
+| PMT | Loan payment for fixed rate/terms |
+| POWER | Number raised to a power |
+| PPMT | Principal portion of a loan payment |
+| PRODUCT | Product of values |
+| RIGHT | Last characters of text |
+| ROUND | Round to given decimals |
+| ROUNDUP | Round away from zero |
+| ROW | Row number of a reference |
+| ROWS | Number of rows in a reference |
+| SQRT | Square root |
+| SUBSTITUTE | Replace occurrences of text |
+| SUBTOTAL | Aggregate ignoring nested SUBTOTALs |
+| SUM | Sum of values |
+| SUMIF | Sum of cells matching a criteria |
+| SUMIFS | Sum matching multiple criteria pairs |
+| TODAY | Current date serial |
+| TRIM | Strip and collapse spaces |
+| TRUE/FALSE | Boolean literals |
+| UPPER | Text converted to uppercase |
+| VLOOKUP | Vertical lookup in first table column |
+| WEEKDAY | Day of week of a date serial |
+| XLOOKUP | Modern lookup with match modes |
+| YEAR | Year of a date serial |
+| IFERROR | Fallback when an expression errors |
+| IFNA | Fallback on #N/A like IFERROR |
+| NA | The #N/A error value |
+| INDIRECT | Reference from text (A1 or R1C1, with sheet) |
+| LET | Bind names to values for a calculation |
+| OFFSET | Range offset by rows/cols with optional height/width |
+| TEXT | Format a value as text using a number format |
+| VALUE | Convert text that looks like a number to a number |
+| FILTER | Filter array rows/cols by include booleans with optional if_empty |
+| TEXTJOIN | Join text with delimiter, optionally ignoring empty |
+| SUMPRODUCT | Sum of products of corresponding array elements |
+
+
 Screenshots:  
 
 **Formulas:**  

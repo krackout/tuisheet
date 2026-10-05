@@ -253,6 +253,11 @@ and choose it on file selector
 
 For version, tuisheet --version or -V
 
+Usage: tuisheet [file.xlsx]
+
+Rendering is message-driven: the screen paints after each
+message, with no frame timer, so idle CPU stays near zero.
+
 `
 
 func printHelp() {
@@ -263,54 +268,80 @@ func printVersion() {
 	fmt.Fprintf(os.Stdout, "%s %s\n", buildinfo.AppName, buildinfo.AppVersion)
 }
 
+type cliOptions struct {
+	file    string
+	help    bool
+	version bool
+}
+
+// parseArgs parses command-line parameters: --help/--version, or the
+// single file to open. Anything else is an unknown parameter.
+func parseArgs(args []string) (cliOptions, error) {
+	var opt cliOptions
+	for _, a := range args {
+		switch {
+		case a == "--help" || a == "-h" || a == "-?":
+			opt.help = true
+		case a == "--version" || a == "-V":
+			opt.version = true
+		case strings.HasPrefix(a, "-"):
+			return opt, fmt.Errorf("unknown parameter: %s", a)
+		default:
+			if opt.file != "" {
+				return opt, fmt.Errorf("unknown parameter")
+			}
+			opt.file = a
+		}
+	}
+	return opt, nil
+}
+
 func main() {
 	args := os.Args[1:]
-	if len(args) == 1 {
-		switch args[0] {
-		case "--help", "-h", "-?":
-			printHelp()
-			return
-		case "--version", "-V":
-			printVersion()
-			return
-		default:
-			if strings.HasPrefix(args[0], "-") {
-				fmt.Fprintf(os.Stdout, "Unknown parameter: %s\n", args[0])
-				printHelp()
-				os.Exit(1)
-				return
-			}
-		}
-	} else if len(args) > 1 {
-		// Only one filename is supported; treat extra args as unknown parameter
-		for _, a := range args {
-			if strings.HasPrefix(a, "-") {
-				fmt.Fprintf(os.Stdout, "Unknown parameter: %s\n", a)
-				printHelp()
-				os.Exit(1)
-				return
-			}
-		}
-		fmt.Fprintln(os.Stdout, "Unknown parameter")
+	cli, err := parseArgs(args)
+	if err != nil {
+		fmt.Fprintln(os.Stdout, err.Error())
 		printHelp()
 		os.Exit(1)
 		return
 	}
+	if cli.help {
+		printHelp()
+		return
+	}
+	if cli.version {
+		printVersion()
+		return
+	}
 
 	a := newApp()
-	if len(args) == 1 && !strings.HasPrefix(args[0], "-") {
-		filename := args[0]
-		if err := a.openXLSX(filename); err != nil {
+	if cli.file != "" {
+		if err := a.openXLSX(cli.file); err != nil {
 			fmt.Fprintf(os.Stderr, "tuisheet: %v\n", err)
 			os.Exit(1)
 		}
 	}
-	p := tea.NewProgram(a, tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithFPS(30), tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
+	var model tea.Model
+	mouseFilter := tea.WithFilter(func(_ tea.Model, msg tea.Msg) tea.Msg {
 		if m, ok := msg.(tea.MouseMsg); ok && m.Action == tea.MouseActionMotion {
 			return nil
 		}
 		return msg
-	}))
+	})
+	opts := []tea.ProgramOption{tea.WithAltScreen(), tea.WithMouseCellMotion(), mouseFilter}
+	// Message-driven rendering only: no frame ticker and no FPS cap;
+	// paintModel renders on message through the raw painter.
+	r, m, rerr := maybeRawPainter(a)
+	if rerr != nil {
+		fmt.Fprintf(os.Stderr, "tuisheet: raw painter unavailable: %v\n", rerr)
+		os.Exit(1)
+	}
+	model = m
+	opts = append(opts, tea.WithoutRenderer())
+	r.start()
+	defer r.stop()
+	p := tea.NewProgram(model, opts...)
+	r.watchResize(p)
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "tuisheet: %v\n", err)
 		os.Exit(1)
