@@ -343,6 +343,10 @@ func main() {
 	p := tea.NewProgram(model, opts...)
 	r.watchResize(p)
 	if _, err := p.Run(); err != nil {
+		// Restore the terminal explicitly: os.Exit skips the deferred
+		// stop, which would leave alt-screen, raw mode and hidden
+		// cursor behind.
+		r.stop()
 		fmt.Fprintf(os.Stderr, "tuisheet: %v\n", err)
 		os.Exit(1)
 	}
@@ -458,6 +462,14 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (a *app) handleKey(msg tea.KeyMsg) tea.Cmd {
+	// Strip control characters from typed/pasted runes once, up front.
+	// Windows reports bare modifier presses as KeyRunes{'\x00'}, which
+	// would otherwise open edit mode with an invisible buffer (or store
+	// the NUL in a cell); \t\n\r survive for paste compatibility.
+	// All sub-handlers below receive the filtered copy.
+	if len(msg.Runes) > 0 {
+		msg.Runes = []rune(filterControlRunes(string(msg.Runes)))
+	}
 	key := msg.String()
 
 	if key == "ctrl+z" && a.mode != modeEdit {

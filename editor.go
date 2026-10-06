@@ -1,6 +1,29 @@
 package main
 
-import "unicode/utf8"
+import (
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
+
+// filterControlRunes drops control characters from typed/pasted input,
+// except tab/newline/CR which cells can legitimately hold. In particular
+// it drops the NUL rune Windows delivers for bare modifier presses
+// (coninput reports Char=0 for Ctrl/Alt alone), which would otherwise
+// open edit mode with an invisible buffer or be stored in cells.
+// Cf format chars (e.g. ZWJ in emoji) are kept for paste compatibility.
+func filterControlRunes(s string) string {
+	clean := strings.Map(func(r rune) rune {
+		if r == '\t' || r == '\n' || r == '\r' {
+			return r
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
+	return clean
+}
 
 // lineEditor helpers — unified rune-aware cursor handling for all
 // text fields (edit, fileInput, rename, search, save, props, colWidth).

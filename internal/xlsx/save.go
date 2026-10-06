@@ -570,7 +570,9 @@ func generateWorksheetXML(s *sheet.Sheet, stringIndex map[string]int, styleIndex
 	pr := newPrinter()
 	pr.w.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
 	pr.w.WriteString(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac xr xr2 xr3" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac" xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision" xmlns:xr2="http://schemas.microsoft.com/office/spreadsheetml/2015/revision2" xmlns:xr3="http://schemas.microsoft.com/office/spreadsheetml/2016/revision3" xr:uid="{00000000-0001-0000-0000-000000000000}">`)
-	writeColsXML(pr, s)
+	// NOTE: ECMA-376 CT_Worksheet enforces child order (Excel rejects
+	// out-of-order parts): dimension, sheetViews, sheetFormatPr, cols,
+	// sheetData, mergeCells, pageMargins. cols used to be emitted first.
 	// Collect all cells, group by row
 	type cellInfo struct {
 		ref     string
@@ -714,6 +716,7 @@ func generateWorksheetXML(s *sheet.Sheet, stringIndex map[string]int, styleIndex
 		pr.w.WriteString(`<sheetViews><sheetView tabSelected="1" workbookViewId="0"/></sheetViews>`)
 	}
 	pr.w.WriteString(`<sheetFormatPr defaultRowHeight="15" x14ac:dyDescent="0.25"/>`)
+	writeColsXML(pr, s)
 	pr.w.WriteString(`<sheetData>`)
 
 	rowNums := make([]int, 0, len(rows))
@@ -771,9 +774,8 @@ func generateWorksheetXML(s *sheet.Sheet, stringIndex map[string]int, styleIndex
 	}
 
 	pr.w.WriteString(`</sheetData>`)
-	pr.w.WriteString(`<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>`)
 
-	// Write merge ranges
+	// Write merge ranges (before pageMargins per CT_Worksheet order)
 	merges := s.Merges()
 	if len(merges) > 0 {
 		pr.w.WriteString(`<mergeCells count="`)
@@ -788,6 +790,8 @@ func generateWorksheetXML(s *sheet.Sheet, stringIndex map[string]int, styleIndex
 		}
 		pr.w.WriteString(`</mergeCells>`)
 	}
+
+	pr.w.WriteString(`<pageMargins left="0.7" right="0.7" top="0.75" bottom="0.75" header="0.3" footer="0.3"/>`)
 
 	pr.w.WriteString(`</worksheet>`)
 	return pr.buf.Bytes()

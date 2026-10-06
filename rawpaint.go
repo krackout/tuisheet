@@ -16,6 +16,7 @@ package main
 // (no cell diffing).
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -33,10 +34,17 @@ import (
 type rawPainter struct {
 	w io.Writer
 
+	// inFd is the resolved console input fd. A literal 0 works on Unix
+	// (fd 0 is stdin) but is a NULL handle on Windows, where
+	// GetConsoleMode would fail with ERROR_INVALID_HANDLE.
+	inFd       int
+	console    *os.File // owned console handle (CONIN$), closed on stop
 	stdinState *term.State
-	done       chan struct{}
-	wake       chan struct{}
-	wg         sync.WaitGroup
+	// restoreOutput undoes setupConsoleOutput (Windows VT processing).
+	restoreOutput func()
+	done          chan struct{}
+	wake          chan struct{}
+	wg            sync.WaitGroup
 
 	mu          sync.Mutex
 	latest      string
@@ -45,21 +53,58 @@ type rawPainter struct {
 	lastWritten string
 }
 
+// resolveConsoleFd reports the fd to use for raw console input, or false
+// when f is not a terminal (redirected stdin, pipe, non-console host).
+func resolveConsoleFd(f *os.File) (int, bool) {
+	if f == nil {
+		return 0, false
+	}
+	fd := int(f.Fd())
+	if !term.IsTerminal(fd) {
+		return 0, false
+	}
+	return fd, true
+}
+
 func newRawPainter(w io.Writer) (*rawPainter, error) {
 	// Raw mode: bubbletea skips tty init without a renderer, so own it.
 	// stdin is what the input pump reads.
-	st, err := term.MakeRaw(0)
+	fd, owned, err := openConsole()
 	if err != nil {
 		return nil, err
 	}
-	return newRawPainterWithState(w, st), nil
+	st, err := term.MakeRaw(fd)
+	if err != nil {
+		if owned != nil {
+			owned.Close()
+		}
+		src := "stdin"
+		if owned != nil {
+			src = "CONIN$"
+		}
+		return nil, fmt.Errorf("raw mode setup failed on %s (fd %d): %w", src, fd, err)
+	}
+	rp := newRawPainterWithState(w, st, fd, owned)
+	if f, ok := w.(*os.File); ok {
+		restore, err := setupConsoleOutput(f)
+		if err != nil {
+			if owned != nil {
+				owned.Close()
+			}
+			return nil, err
+		}
+		rp.restoreOutput = restore
+	}
+	return rp, nil
 }
 
 // newRawPainterWithState builds a painter without touching the tty, so
 // tests can inject a buffer writer and no stdin state.
-func newRawPainterWithState(w io.Writer, st *term.State) *rawPainter {
+func newRawPainterWithState(w io.Writer, st *term.State, fd int, owned *os.File) *rawPainter {
 	return &rawPainter{
 		w:          w,
+		inFd:       fd,
+		console:    owned,
 		stdinState: st,
 		done:       make(chan struct{}),
 		wake:       make(chan struct{}, 1),
@@ -94,6 +139,10 @@ func (p *rawPainter) run() {
 
 func (p *rawPainter) stop() {
 	p.mu.Lock()
+	if p.stopped {
+		p.mu.Unlock()
+		return
+	}
 	p.stopped = true
 	p.mu.Unlock()
 	close(p.done)
@@ -108,9 +157,17 @@ func (p *rawPainter) stop() {
 		p.writeFrame(frame)
 	}
 	_, _ = io.WriteString(p.w, "\x1b[?1002l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[?1049l")
+	if p.restoreOutput != nil {
+		p.restoreOutput()
+		p.restoreOutput = nil
+	}
 	if p.stdinState != nil {
-		_ = term.Restore(0, p.stdinState)
+		_ = term.Restore(p.inFd, p.stdinState)
 		p.stdinState = nil
+	}
+	if p.console != nil {
+		p.console.Close()
+		p.console = nil
 	}
 }
 
@@ -198,7 +255,7 @@ func maybeRawPainter(a *app) (*rawPainter, tea.Model, error) {
 	}
 	// Synchronous initial size: watchResize only forwards later changes,
 	// so size the app before the first frame instead of assuming 80x24.
-	if w, h, gerr := term.GetSize(0); gerr == nil && w > 0 && h > 0 {
+	if w, h, gerr := term.GetSize(rp.inFd); gerr == nil && w > 0 && h > 0 {
 		a.width = max(1, w)
 		a.height = max(1, h)
 		a.ensureVisible()
