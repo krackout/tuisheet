@@ -400,7 +400,7 @@ func (a *app) colW(s *sheet.Sheet, col int) int {
 }
 
 func (a *app) visibleCols(s *sheet.Sheet, cOff int, availPx int) ([]int, int) {
-	var vc []int
+	vc := make([]int, 0, availPx/a.defaultColWidth+2)
 	used := 0
 	col := cOff
 	for {
@@ -433,7 +433,7 @@ func (a *app) visibleCols(s *sheet.Sheet, cOff int, availPx int) ([]int, int) {
 }
 
 func (a *app) visibleRows(s *sheet.Sheet, rOff int, availRows int) []int {
-	var vr []int
+	vr := make([]int, 0, availRows)
 	row := rOff
 	for len(vr) < availRows {
 		if !s.IsRowHidden(row) {
@@ -816,6 +816,7 @@ func (a *app) inputStatusLine(prefix, input string, cursor int) string {
 	hi := min(len(runes), lo+runesCols)
 	hasRight := hi < len(runes)
 	var b strings.Builder
+	b.Grow(a.width + 32)
 	if hasLeft {
 		b.WriteString("< ")
 	}
@@ -828,14 +829,16 @@ func (a *app) inputStatusLine(prefix, input string, cursor int) string {
 	}
 	used := 0
 	for i := lo; i < hi; i++ {
-		w := runewidth.StringWidth(string(runes[i]))
+		w := runewidth.RuneWidth(runes[i])
 		if used+w > budgetContent {
 			break
 		}
 		if i == cursor {
-			b.WriteString(style(sgrReverseVideo, string(runes[i])))
+			b.WriteString(sgrReverseVideo)
+			b.WriteRune(runes[i])
+			b.WriteString(sgrReset)
 		} else {
-			b.WriteString(string(runes[i]))
+			b.WriteRune(runes[i])
 		}
 		used += w
 	}
@@ -889,6 +892,7 @@ func (a *app) inputPromptLine(prefix, input string, cursor int) string {
 	hi := min(len(runes), lo+runesCols)
 	hasRight := hi < len(runes)
 	var b strings.Builder
+	b.Grow(a.width + 32)
 	if hasLeft {
 		b.WriteString("< ")
 	}
@@ -901,14 +905,18 @@ func (a *app) inputPromptLine(prefix, input string, cursor int) string {
 	}
 	used := 0
 	for i := lo; i < hi; i++ {
-		w := runewidth.StringWidth(string(runes[i]))
+		w := runewidth.RuneWidth(runes[i])
 		if used+w > budgetContent {
 			break
 		}
 		if i == cursor {
-			b.WriteString(style(sgrReverseVideo, string(runes[i])))
+			b.WriteString(sgrReverseVideo)
+			b.WriteRune(runes[i])
+			b.WriteString(sgrReset)
 		} else {
-			b.WriteString(style(sgrBold, string(runes[i])))
+			b.WriteString(sgrBold)
+			b.WriteRune(runes[i])
+			b.WriteString(sgrReset)
 		}
 		used += w
 	}
@@ -974,6 +982,7 @@ func (a *app) editStatusLeft(budget int) string {
 	hasRight := hi < len(runes)
 
 	var b strings.Builder
+	b.Grow(a.width + 32)
 	if hasLeft {
 		b.WriteString("< ")
 	}
@@ -986,14 +995,16 @@ func (a *app) editStatusLeft(budget int) string {
 	}
 	used := 0
 	for i := lo; i < hi; i++ {
-		w := runewidth.StringWidth(string(runes[i]))
+		w := runewidth.RuneWidth(runes[i])
 		if used+w > budgetContent {
 			break
 		}
 		if i == cur {
-			b.WriteString(style(sgrReverseVideo, string(runes[i])))
+			b.WriteString(sgrReverseVideo)
+			b.WriteRune(runes[i])
+			b.WriteString(sgrReset)
 		} else {
-			b.WriteString(string(runes[i]))
+			b.WriteRune(runes[i])
 		}
 		used += w
 	}
@@ -1040,6 +1051,7 @@ func (a *app) tabLine() string {
 	// cost of occasional right-edge overflow on the terminal.
 
 	var line strings.Builder
+	line.Grow(a.width + 32)
 	line.WriteString(" (+)")
 	if hasLeft {
 		line.WriteString(" <- ")
@@ -1107,7 +1119,9 @@ func (a *app) gridLines() []string {
 			scrollW = 1
 		}
 		scrollCols, partialW := a.visibleCols(a.sheet, a.colOffset, scrollW)
-		vc := append(append([]int{}, frozenCols...), scrollCols...)
+		vc := make([]int, 0, len(frozenCols)+len(scrollCols))
+		vc = append(vc, frozenCols...)
+		vc = append(vc, scrollCols...)
 		frozenH := len(frozenRows)
 		scrollH := rows - frozenH
 		if scrollH < 0 {
@@ -1121,6 +1135,7 @@ func (a *app) gridLines() []string {
 		}
 		lines := make([]string, 0, rows+1)
 		var header strings.Builder
+		header.Grow(a.width + 32)
 		header.WriteString(style(sgrTealBand, strings.Repeat(" ", rowHeaderWidth)))
 		for ci, col := range vc {
 			if col == a.active.Col {
@@ -1130,12 +1145,15 @@ func (a *app) gridLines() []string {
 			}
 		}
 		lines = append(lines, fitDisplay(header.String(), a.width))
-		vrAll := append(append([]int{}, frozenRows...), scrollRows...)
+		vrAll := make([]int, 0, len(frozenRows)+len(scrollRows))
+		vrAll = append(vrAll, frozenRows...)
+		vrAll = append(vrAll, scrollRows...)
 		if len(vrAll) > rows {
 			vrAll = vrAll[:rows]
 		}
 		for _, row := range vrAll {
 			var line strings.Builder
+			line.Grow(a.width + 32)
 			rowHeader := fmt.Sprintf("%*d ", rowHeaderWidth-1, row+1)
 			if row == a.active.Row {
 				line.WriteString(style(sgrBlueBand, rowHeader))
@@ -1185,6 +1203,7 @@ func (a *app) gridLines() []string {
 	vr := a.visibleRows(a.sheet, a.rowOffset, rows)
 	lines := make([]string, 0, rows+1)
 	var header strings.Builder
+	header.Grow(a.width + 32)
 	header.WriteString(style(sgrTealBand, strings.Repeat(" ", rowHeaderWidth)))
 	for ci, col := range vc {
 		if col == a.active.Col {
@@ -1198,6 +1217,7 @@ func (a *app) gridLines() []string {
 	for r := 0; r < len(vr); r++ {
 		row := vr[r]
 		var line strings.Builder
+		line.Grow(a.width + 32)
 		rowHeader := fmt.Sprintf("%*d ", rowHeaderWidth-1, row+1)
 		if row == a.active.Row {
 			line.WriteString(style(sgrBlueBand, rowHeader))
@@ -1246,16 +1266,22 @@ func (a *app) perspectiveLines() []string {
 		vc, partialW := a.visibleCols(s, cOff, max(1, a.width-rowHeaderWidth-indent))
 		pad := strings.Repeat(" ", indent)
 		var hdr strings.Builder
+		hdr.Grow(a.width + 32)
 		hdr.WriteString(pad)
 		label := fit(a.sheetNames[si], rowHeaderWidth)
 		hdr.WriteString(style(sgrTealBand, label))
 		for ci, col := range vc {
-			hdr.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colWidthVC(s, vc, ci, partialW))))
+			if si == a.activeSheet && col == a.active.Col {
+				hdr.WriteString(style(sgrBlueBand, center(sheet.ColumnName(col), a.colWidthVC(s, vc, ci, partialW))))
+			} else {
+				hdr.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colWidthVC(s, vc, ci, partialW))))
+			}
 		}
 		lines = append(lines, fitDisplay(hdr.String(), a.width))
 		for r := 0; r < perBand; r++ {
 			row := rOff + r
 			var line strings.Builder
+			line.Grow(a.width + 32)
 			line.WriteString(pad)
 			rowHdr := fmt.Sprintf("%*d ", rowHeaderWidth-1, row+1)
 			if si == a.activeSheet && row == a.active.Row {
@@ -1306,15 +1332,21 @@ func (a *app) horizontalLines() []string {
 		rOff, cOff := a.sheetOffset(si)
 		vc, partialW := a.visibleCols(s, cOff, max(1, a.width-rowHeaderWidth))
 		var hdr strings.Builder
+		hdr.Grow(a.width + 32)
 		label := fit(a.sheetNames[si], rowHeaderWidth)
 		hdr.WriteString(style(sgrTealBand, label))
 		for ci, col := range vc {
-			hdr.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colWidthVC(s, vc, ci, partialW))))
+			if si == a.activeSheet && col == a.active.Col {
+				hdr.WriteString(style(sgrBlueBand, center(sheet.ColumnName(col), a.colWidthVC(s, vc, ci, partialW))))
+			} else {
+				hdr.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colWidthVC(s, vc, ci, partialW))))
+			}
 		}
 		lines = append(lines, fitDisplay(hdr.String(), a.width))
 		for r := 0; r < perBand; r++ {
 			row := rOff + r
 			var line strings.Builder
+			line.Grow(a.width + 32)
 			rowHdr := fmt.Sprintf("%*d ", rowHeaderWidth-1, row+1)
 			if si == a.activeSheet && row == a.active.Row {
 				line.WriteString(style(sgrBlueBand, rowHdr))
@@ -1358,6 +1390,7 @@ func (a *app) verticalLines() []string {
 	var lines []string
 
 	var hdr strings.Builder
+	hdr.Grow(a.width + 32)
 	for pass, si := range a.viewSheets {
 		if pass >= 2 {
 			break
@@ -1368,20 +1401,40 @@ func (a *app) verticalLines() []string {
 		label := fit(a.sheetNames[si], rowHeaderWidth)
 		hdr.WriteString(style(sgrTealBand, label))
 		for ci, col := range vc {
-			hdr.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colWidthVC(s, vc, ci, partialW))))
+			if si == a.activeSheet && col == a.active.Col {
+				hdr.WriteString(style(sgrBlueBand, center(sheet.ColumnName(col), a.colWidthVC(s, vc, ci, partialW))))
+			} else {
+				hdr.WriteString(style(sgrTealBand, center(sheet.ColumnName(col), a.colWidthVC(s, vc, ci, partialW))))
+			}
 		}
 	}
 	lines = append(lines, fitDisplay(hdr.String(), a.width))
 
+	type paneLayout struct {
+		si       int
+		s        *sheet.Sheet
+		rOff     int
+		cOff     int
+		vc       []int
+		partialW int
+	}
+	// Column layout depends only on sheet and offsets, not the row:
+	// compute once per pane instead of once per row.
+	layouts := make([]paneLayout, 0, 2)
+	for pass, si := range a.viewSheets {
+		if pass >= 2 {
+			break
+		}
+		s := a.sheets[si]
+		rOff, cOff := a.sheetOffset(si)
+		vc, partialW := a.visibleCols(s, cOff, panePx)
+		layouts = append(layouts, paneLayout{si, s, rOff, cOff, vc, partialW})
+	}
 	for r := 0; r < available; r++ {
 		var line strings.Builder
-		for pass, si := range a.viewSheets {
-			if pass >= 2 {
-				break
-			}
-			s := a.sheets[si]
-			rOff, cOff := a.sheetOffset(si)
-			vc, partialW := a.visibleCols(s, cOff, panePx)
+		line.Grow(a.width + 32)
+		for _, ly := range layouts {
+			si, s, rOff, cOff, vc, partialW := ly.si, ly.s, ly.rOff, ly.cOff, ly.vc, ly.partialW
 			row := rOff + r
 			rowHdr := fmt.Sprintf("%*d ", rowHeaderWidth-1, row+1)
 			if si == a.activeSheet && row == a.active.Row {

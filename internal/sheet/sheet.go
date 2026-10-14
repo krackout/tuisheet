@@ -900,8 +900,9 @@ func splitFormulaArgs(args string) []string {
 }
 
 func splitTopLevel(expr string, sep rune) []string {
-	var parts []string
+	parts := make([]string, 0, strings.Count(expr, string(sep))+1)
 	var current strings.Builder
+	current.Grow(len(expr))
 	depth := 0
 	inString := false
 	for _, r := range expr {

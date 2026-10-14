@@ -603,9 +603,9 @@ func (a *app) handleKey(msg tea.KeyMsg) tea.Cmd {
 		a.move(0, -1)
 	case "right":
 		a.move(0, 1)
-	case "ctrl+pgup":
+	case "ctrl+pgup", "ctrl+o":
 		a.switchSheet(-1)
-	case "ctrl+pgdown":
+	case "ctrl+pgdown", "ctrl+p":
 		a.switchSheet(1)
 	case "pgup":
 		a.movePage(-1)
@@ -1732,7 +1732,7 @@ func (a *app) handleCopySelectKey(msg tea.KeyMsg) tea.Cmd {
 		a.copySrcSheet = a.activeSheet
 		a.rangeSelecting = false
 		a.mode = modeCopyDest
-		a.message = fmt.Sprintf("Copy %s -> select destination (top-left) with arrows, Ctrl+PgUp/PgDn switch sheet, Enter to copy, Esc to cancel", a.copySrcRange.Start.String()+":"+a.copySrcRange.End.String())
+		a.message = fmt.Sprintf("Copy %s -> select destination (top-left) with arrows, Ctrl+PgUp/PgDn (or Ctrl+O/Ctrl+P) switch sheet, Enter to copy, Esc to cancel", a.copySrcRange.Start.String()+":"+a.copySrcRange.End.String())
 		a.ensureVisible()
 		return nil
 	case "up":
@@ -1770,7 +1770,7 @@ func (a *app) handleMoveSelectKey(msg tea.KeyMsg) tea.Cmd {
 		a.copySrcSheet = a.activeSheet
 		a.rangeSelecting = false
 		a.mode = modeMoveDest
-		a.message = fmt.Sprintf("Move %s -> select destination (top-left) with arrows, Ctrl+PgUp/PgDn switch sheet, Enter to move, Esc to cancel", a.copySrcRange.Start.String()+":"+a.copySrcRange.End.String())
+		a.message = fmt.Sprintf("Move %s -> select destination (top-left) with arrows, Ctrl+PgUp/PgDn (or Ctrl+O/Ctrl+P) switch sheet, Enter to move, Esc to cancel", a.copySrcRange.Start.String()+":"+a.copySrcRange.End.String())
 		a.ensureVisible()
 		return nil
 	case "up":
@@ -1890,14 +1890,14 @@ func (a *app) handleDestKey(msg tea.KeyMsg, isMove bool) tea.Cmd {
 		a.destMovePage(-1)
 	case "pgdown":
 		a.destMovePage(1)
-	case "ctrl+pgup":
+	case "ctrl+pgup", "ctrl+o":
 		if a.activeSheet > 0 {
 			a.setActiveSheetNoReset(a.activeSheet - 1)
 			a.ensureVisible()
 			r := a.destBounds()
 			a.message = fmt.Sprintf("%s %s -> %s on %s (Enter to %s, Esc to cancel)", a.copyOp, a.copySrcRange.Start.String()+":"+a.copySrcRange.End.String(), r.Start.String(), a.sheetNames[a.activeSheet], strings.ToLower(a.copyOp))
 		}
-	case "ctrl+pgdown":
+	case "ctrl+pgdown", "ctrl+p":
 		if a.activeSheet < len(a.sheets)-1 {
 			a.setActiveSheetNoReset(a.activeSheet + 1)
 			a.ensureVisible()

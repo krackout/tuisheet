@@ -354,6 +354,7 @@ func (a *app) withGeneralHelpPopup(lines []string) []string {
 		" Ctrl+Z           Undo last action",
 		" Ctrl+Y           Redo last undone action",
 		" Ctrl+PgUp/PgDn   Switch sheets",
+		" Ctrl+O / Ctrl+P  Switch sheets (also)",
 		" File->SaveAs     Auto-adds .xlsx extension",
 		" File->Properties Show/Edit workbook properties",
 		" Data->Sort       Sort selected range by column",

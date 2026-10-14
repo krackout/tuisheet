@@ -14,6 +14,8 @@ import (
 
 var wildcardRegexCache sync.Map // pattern -> *regexp.Regexp
 
+var letIdentRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`)
+
 // evalKey identifies a cell being evaluated, qualified by its sheet so
 // that cycle detection never confuses two different sheets holding the
 // same coordinates (e.g. Checks!A3 vs Data!A3).
@@ -2394,7 +2396,17 @@ func wildcardRegex(pattern string) (*regexp.Regexp, bool) {
 // matchCriteria implements Excel criteria strings for the *IF family: an
 // optional operator prefix (>=, <=, <>, >, <, =), numeric or textual targets,
 // case-insensitive equality, and * / ? wildcards.
-func matchCriteria(v Value, criteria string) bool {
+// parsedCriteria is a criteria string parsed once so per-cell matching
+// avoids re-trimming, re-lowering and re-compiling on every cell.
+type parsedCriteria struct {
+	op     string
+	num    float64
+	isNum  bool
+	target string
+	wild   *regexp.Regexp
+}
+
+func parseCriteria(criteria string) parsedCriteria {
 	criteria = strings.TrimSpace(criteria)
 	op := "="
 	for _, cand := range []string{">=", "<=", "<>", ">", "<", "="} {
@@ -2404,46 +2416,60 @@ func matchCriteria(v Value, criteria string) bool {
 			break
 		}
 	}
-
+	pc := parsedCriteria{op: op, target: strings.ToLower(criteria)}
 	if num, err := strconv.ParseFloat(criteria, 64); err == nil {
+		pc.isNum = true
+		pc.num = num
+	} else if re, ok := wildcardRegex(criteria); ok {
+		pc.wild = re
+	}
+	return pc
+}
+
+func matchParsedCriteria(v Value, pc parsedCriteria) bool {
+	if pc.isNum {
 		if v.Type != valNumber {
-			return op == "<>"
+			return pc.op == "<>"
 		}
-		switch op {
+		switch pc.op {
 		case ">":
-			return v.Num > num
+			return v.Num > pc.num
 		case "<":
-			return v.Num < num
+			return v.Num < pc.num
 		case ">=":
-			return v.Num >= num
+			return v.Num >= pc.num
 		case "<=":
-			return v.Num <= num
+			return v.Num <= pc.num
 		case "<>":
-			return v.Num != num
+			return v.Num != pc.num
 		default:
-			return v.Num == num
+			return v.Num == pc.num
 		}
 	}
 
-	text := strings.ToLower(valueText(v))
-	target := strings.ToLower(criteria)
-	if re, ok := wildcardRegex(criteria); ok {
-		return re.MatchString(valueText(v)) == (op != "<>")
+	raw := valueText(v)
+	text := strings.ToLower(raw)
+	if pc.wild != nil {
+		return pc.wild.MatchString(raw) == (pc.op != "<>")
 	}
-	switch op {
+	switch pc.op {
 	case ">":
-		return text > target
+		return text > pc.target
 	case "<":
-		return text < target
+		return text < pc.target
 	case ">=":
-		return text >= target
+		return text >= pc.target
 	case "<=":
-		return text <= target
+		return text <= pc.target
 	case "<>":
-		return text != target
+		return text != pc.target
 	default:
-		return text == target
+		return text == pc.target
 	}
+}
+
+func matchCriteria(v Value, criteria string) bool {
+	return matchParsedCriteria(v, parseCriteria(criteria))
 }
 
 // criteriaArgText evaluates the criteria argument to its text form so that
@@ -2469,6 +2495,7 @@ func (s *Sheet) evalIfFamily(args []funcArg, current Coord, seen map[evalKey]boo
 	if err != nil {
 		return Value{}, err
 	}
+	pc := parseCriteria(criteria)
 	var target *Range
 	var targetSheet *Sheet
 	if len(args) >= 3 {
@@ -2493,7 +2520,7 @@ func (s *Sheet) evalIfFamily(args []funcArg, current Coord, seen map[evalKey]boo
 			continue
 		}
 		v, err := criteriaSheet.evaluateCell(cell, seen)
-		if err != nil || !matchCriteria(v, criteria) {
+		if err != nil || !matchParsedCriteria(v, pc) {
 			continue
 		}
 		matched++
@@ -3217,9 +3244,9 @@ func (s *Sheet) evalMultiCriteria(args []funcArg, current Coord, seen map[evalKe
 	baseRows := base.End.Row - base.Start.Row + 1
 	baseCols := base.End.Col - base.Start.Col + 1
 
-	criteriaTexts := make([]string, len(args)/2)
 	sheets := make([]*Sheet, len(args)/2)
 	ranges := make([]Range, len(args)/2)
+	criteria := make([]parsedCriteria, len(args)/2)
 	for p := 0; p*2 < len(args); p++ {
 		cr := args[p*2]
 		if !cr.isRange {
@@ -3234,7 +3261,7 @@ func (s *Sheet) evalMultiCriteria(args []funcArg, current Coord, seen map[evalKe
 		if rng.End.Row-rng.Start.Row+1 != baseRows || rng.End.Col-rng.Start.Col+1 != baseCols {
 			return nil, nil, nil, fmt.Errorf("%s: criteria range shapes differ", mode)
 		}
-		criteriaTexts[p] = txt
+		criteria[p] = parseCriteria(txt)
 		sheets[p] = sh
 		ranges[p] = rng
 	}
@@ -3250,7 +3277,7 @@ func (s *Sheet) evalMultiCriteria(args []funcArg, current Coord, seen map[evalKe
 				break
 			}
 			v, err := sheets[p].evaluateCell(cell, seen)
-			if err != nil || !matchCriteria(v, criteriaTexts[p]) {
+			if err != nil || !matchParsedCriteria(v, criteria[p]) {
 				okPos = false
 				break
 			}
@@ -3627,6 +3654,7 @@ func (s *Sheet) adjustAllFormulas(adjustFn func(Coord) (Coord, bool)) {
 
 func adjustFormulaText(text string, adjustFn func(Coord) (Coord, bool)) string {
 	var out strings.Builder
+	out.Grow(len(text))
 	inString := false
 	i := 0
 	for i < len(text) {
@@ -3956,7 +3984,6 @@ func (s *Sheet) evalFuncLet(args []funcArg, current Coord, seen map[evalKey]bool
 	if len(args) < 3 || len(args)%2 == 0 {
 		return Value{}, fmt.Errorf("LET requires an odd number of arguments (name/value pairs plus calc)")
 	}
-	letIdentRE := regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.]*$`)
 	bindings := make(map[string]Value, (len(args)-1)/2)
 	order := make([]string, 0, (len(args)-1)/2)
 	for i := 0; i < len(args)-1; i += 2 {
@@ -4053,6 +4080,7 @@ func substituteLetBindings(expr string, bindings map[string]Value) string {
 		}
 	}
 	var out strings.Builder
+	out.Grow(len(expr))
 	i := 0
 	inStr := false
 	for i < len(expr) {
@@ -4422,7 +4450,7 @@ func (s *Sheet) evalFuncTextJoin(args []funcArg, current Coord, seen map[evalKey
 		}
 		ignoreEmpty = isTruthy(v)
 	}
-	var parts []string
+	parts := make([]string, 0, len(args))
 	for _, arg := range args[2:] {
 		if arg.isRange {
 			tgt := arg.targetSheet(s)

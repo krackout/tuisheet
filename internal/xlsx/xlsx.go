@@ -864,6 +864,11 @@ func richText(text string, runs []textRunXML) string {
 		s = text
 	} else {
 		var out strings.Builder
+		n := 0
+		for _, run := range runs {
+			n += len(run.Text)
+		}
+		out.Grow(n)
 		for _, run := range runs {
 			out.WriteString(run.Text)
 		}

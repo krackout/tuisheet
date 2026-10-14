@@ -478,8 +478,12 @@ func isNumber(s string) bool {
 // map so worksheet generation can intern strings in O(1) instead of
 // scanning the slice per cell.
 func collectSharedStrings(sheets []*sheet.Sheet) ([]string, map[string]int) {
-	seen := map[string]int{}
-	var out []string
+	n := 0
+	for _, s := range sheets {
+		n += s.LenCells() + s.LenFormulas()
+	}
+	seen := make(map[string]int, n)
+	out := make([]string, 0, n)
 	for _, s := range sheets {
 		s.ForEachCell(func(c sheet.Coord, value, formula string, style sheet.Style) bool {
 			if formula != "" {
@@ -531,6 +535,11 @@ func unsanitizeForSave(s string) string {
 
 func generateSharedStringsXML(strs []string) []byte {
 	pr := newPrinter()
+	n := 256
+	for _, s := range strs {
+		n += len(s) + 32
+	}
+	pr.buf.Grow(n)
 	pr.w.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
 	pr.w.WriteString(`<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="`)
 	pr.writeInt(len(strs))
@@ -568,6 +577,7 @@ func (p *xmlPrinter) writeInt(v int) {
 
 func generateWorksheetXML(s *sheet.Sheet, stringIndex map[string]int, styleIndexMap map[sheet.Style]int) []byte {
 	pr := newPrinter()
+	pr.buf.Grow(1024 + (s.LenCells()+s.LenFormulas())*64)
 	pr.w.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
 	pr.w.WriteString(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="x14ac xr xr2 xr3" xmlns:x14ac="http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac" xmlns:xr="http://schemas.microsoft.com/office/spreadsheetml/2014/revision" xmlns:xr2="http://schemas.microsoft.com/office/spreadsheetml/2015/revision2" xmlns:xr3="http://schemas.microsoft.com/office/spreadsheetml/2016/revision3" xr:uid="{00000000-0001-0000-0000-000000000000}">`)
 	// NOTE: ECMA-376 CT_Worksheet enforces child order (Excel rejects
@@ -581,7 +591,7 @@ func generateWorksheetXML(s *sheet.Sheet, stringIndex map[string]int, styleIndex
 		value   string
 		t       string
 	}
-	rows := map[int][]cellInfo{}
+	rows := make(map[int][]cellInfo, s.LenCells()+s.LenFormulas())
 
 	s.ForEachCell(func(c sheet.Coord, value, formula string, style sheet.Style) bool {
 		ref := c.String()
