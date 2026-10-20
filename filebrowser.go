@@ -308,9 +308,10 @@ func (a *app) withFileBrowserPopup(lines []string) []string {
 	}
 	// filter highlight for Open and SaveAs typing (reuse)
 	filter := ""
-	if a.mode == modeOpenFile {
+	switch a.mode {
+	case modeOpenFile:
 		filter = strings.TrimSpace(a.fileInput)
-	} else if a.mode == modeSave {
+	case modeSave:
 		filter = strings.TrimSpace(a.saveInput)
 		// strip .xlsx extension for matching
 		if strings.HasSuffix(strings.ToLower(filter), ".xlsx") {
@@ -357,10 +358,10 @@ func (a *app) withFileBrowserPopup(lines []string) []string {
 	for row := boxY; row < boxY+boxH && row < len(lines); row++ {
 		i := row - boxY
 		var boxLine string
-		switch {
-		case i == 0:
+		switch i {
+		case 0:
 			boxLine = "┌" + strings.Repeat("─", innerW) + "┐"
-		case i == boxH-1:
+		case boxH - 1:
 			boxLine = "└" + strings.Repeat("─", innerW) + "┘"
 		default:
 			ci := i - 1

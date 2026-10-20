@@ -13,6 +13,15 @@ func (a *app) takeSnapshot(comment string) {
 	a.redoStack = nil
 }
 
+// markDirty records a content change as a new state version. Undo/redo can
+// then tell whether the workbook is back at the state it had when it was
+// last loaded or saved, instead of assuming every undo is still a change.
+func (a *app) markDirty() {
+	a.stateSeq++
+	a.stateID = a.stateSeq
+	a.dirty = true
+}
+
 // snapshotSheet captures every field of a sheet in one place so a future
 // field addition only needs to be added here and in toSheet.
 func snapshotSheet(s *sheet.Sheet) sheetSnapshot {
@@ -53,6 +62,7 @@ func (a *app) captureSnapshot(comment string) appSnapshot {
 		colWidth:    a.defaultColWidth,
 		docProps:    a.docProps,
 		docDirty:    a.docPropsDirty,
+		stateID:     a.stateID,
 	}
 }
 
@@ -76,6 +86,8 @@ func (a *app) restoreSnapshot(snap *appSnapshot) {
 	}
 	a.docProps = snap.docProps
 	a.docPropsDirty = snap.docDirty
+	a.stateID = snap.stateID
+	a.dirty = a.stateID != a.savedStateID
 	a.wireResolvers()
 }
 
@@ -88,7 +100,6 @@ func (a *app) undo() {
 	snap := a.undoStack[len(a.undoStack)-1]
 	a.undoStack = a.undoStack[:len(a.undoStack)-1]
 	a.restoreSnapshot(&snap)
-	a.dirty = true
 	a.message = "Undo: " + snap.comment
 }
 
@@ -101,6 +112,5 @@ func (a *app) redo() {
 	snap := a.redoStack[len(a.redoStack)-1]
 	a.redoStack = a.redoStack[:len(a.redoStack)-1]
 	a.restoreSnapshot(&snap)
-	a.dirty = true
 	a.message = "Redo: " + snap.comment
 }

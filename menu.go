@@ -216,7 +216,7 @@ func (a *app) executeMenuLeaf() tea.Cmd {
 		a.mode = modeColWidth
 	case "Worksheet/Column/Reset-width":
 		a.sheet.ResetColWidth(a.active.Col)
-		a.dirty = true
+		a.markDirty()
 		a.message = "Column " + sheet.ColumnName(a.active.Col) + " width reset to default"
 	case "Worksheet/Column/set-Global-width":
 		a.colWidthGlobal = true
@@ -228,22 +228,22 @@ func (a *app) executeMenuLeaf() tea.Cmd {
 			a.sheet.ResetColWidth(c)
 		}
 		a.defaultColWidth = 11
-		a.dirty = true
+		a.markDirty()
 		a.message = "All columns width reset to default"
 	case "Worksheet/Column/Insert/Left":
 		a.takeSnapshot("Insert column left")
 		a.sheet.InsertColumn(a.active.Col)
-		a.dirty = true
+		a.markDirty()
 		a.message = "Inserted column left of " + sheet.ColumnName(a.active.Col)
 	case "Worksheet/Column/Insert/Right":
 		a.takeSnapshot("Insert column right")
 		a.sheet.InsertColumn(a.active.Col + 1)
-		a.dirty = true
+		a.markDirty()
 		a.message = "Inserted column right of " + sheet.ColumnName(a.active.Col)
 	case "Worksheet/Column/Delete":
 		a.takeSnapshot("Delete column " + sheet.ColumnName(a.active.Col))
 		a.sheet.DeleteColumn(a.active.Col)
-		a.dirty = true
+		a.markDirty()
 		a.message = "Deleted column " + sheet.ColumnName(a.active.Col)
 	case "Worksheet/Column/Hide":
 		a.colHideInput = ""
@@ -254,12 +254,12 @@ func (a *app) executeMenuLeaf() tea.Cmd {
 	case "Worksheet/Row/Insert/Above":
 		a.takeSnapshot("Insert row above")
 		a.sheet.InsertRow(a.active.Row)
-		a.dirty = true
+		a.markDirty()
 		a.message = fmt.Sprintf("Inserted row above %d", a.active.Row+1)
 	case "Worksheet/Row/Insert/Below":
 		a.takeSnapshot("Insert row below")
 		a.sheet.InsertRow(a.active.Row + 1)
-		a.dirty = true
+		a.markDirty()
 		a.message = fmt.Sprintf("Inserted row below %d", a.active.Row+1)
 	case "Worksheet/Row/Delete":
 		a.rowHideInput = ""
@@ -272,7 +272,7 @@ func (a *app) executeMenuLeaf() tea.Cmd {
 		a.mode = modeRowDisplay
 	case "Worksheet/Sheet/New":
 		a.addSheet()
-		a.dirty = true
+		a.markDirty()
 	case "Worksheet/Sheet/Rename":
 		a.mode = modeRenameSheet
 		a.renameInput = a.sheetNames[a.activeSheet]
@@ -304,7 +304,7 @@ func (a *app) executeMenuLeaf() tea.Cmd {
 		if a.sheet.IsFrozen() {
 			a.takeSnapshot("Unfreeze titles")
 			a.sheet.SetFreeze(0, 0)
-			a.dirty = true
+			a.markDirty()
 			a.message = "Titles unfrozen"
 		} else {
 			if a.active.Row == 0 && a.active.Col == 0 {
@@ -312,7 +312,7 @@ func (a *app) executeMenuLeaf() tea.Cmd {
 			} else {
 				a.takeSnapshot("Freeze titles")
 				a.sheet.SetFreeze(a.active.Row, a.active.Col)
-				a.dirty = true
+				a.markDirty()
 				a.message = "Titles-freeze selected. If titles are active (sheet frozen), press again to disable. Viewable in default view only"
 			}
 			// auto-clear handled above

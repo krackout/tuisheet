@@ -76,7 +76,7 @@ func newRawPainter(w io.Writer) (*rawPainter, error) {
 	st, err := term.MakeRaw(fd)
 	if err != nil {
 		if owned != nil {
-			owned.Close()
+			_ = owned.Close()
 		}
 		src := "stdin"
 		if owned != nil {
@@ -89,7 +89,7 @@ func newRawPainter(w io.Writer) (*rawPainter, error) {
 		restore, err := setupConsoleOutput(f)
 		if err != nil {
 			if owned != nil {
-				owned.Close()
+				_ = owned.Close()
 			}
 			return nil, err
 		}
@@ -166,7 +166,7 @@ func (p *rawPainter) stop() {
 		p.stdinState = nil
 	}
 	if p.console != nil {
-		p.console.Close()
+		_ = p.console.Close()
 		p.console = nil
 	}
 }

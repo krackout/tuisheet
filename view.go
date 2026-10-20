@@ -298,7 +298,7 @@ func (a *app) ensureSheetVisible() {
 
 func (a *app) addSheet() {
 	a.takeSnapshot("Add sheet")
-	a.dirty = true
+	a.markDirty()
 	name := a.nextSheetName()
 	newSheet := sheet.New()
 	a.sheets = append(a.sheets, newSheet)
@@ -752,7 +752,7 @@ func (a *app) statusLine() string {
 		if avail < 0 {
 			avail = 0
 		}
-		content := a.sheet.Raw(a.active)
+		content := sheet.SanitizeForDisplay(a.sheet.Raw(a.active))
 		if displayWidth(content) > avail {
 			// Long cells truncate with an ellipsis; keep one column of
 			// breathing space before the band.
@@ -1482,6 +1482,17 @@ func (a *app) cellDisplayWidth(cell sheet.Coord, vc []int, ci, partialW int) int
 	return a.spanWidthVC(a.sheet, vc, ci, span, partialW)
 }
 
+// fileTag renders the filename chip in the status line. A modified
+// workbook gets a bold, reverse-video asterisk immediately after the name.
+func (a *app) fileTag(name string) string {
+	if !a.dirty {
+		return style(sgrReverseVideo, " "+name+" ")
+	}
+	return style(sgrReverseVideo, " "+name) +
+		style(sgrReverseVideo+sgrBold, "*") +
+		style(sgrReverseVideo, " ")
+}
+
 func (a *app) messageLine() string {
 	msg := a.message
 	if a.mode == modeEdit {
@@ -1515,13 +1526,13 @@ func (a *app) messageLine() string {
 		if abs, err := filepath.Abs(fullPath); err == nil {
 			fullPath = abs
 		}
-		fileTag := style(sgrReverseVideo, " "+fullPath+" ")
-		return fit(fileTag+" "+style(sgrBold, msg), a.width)
+		tag := a.fileTag(fullPath)
+		return fit(tag+" "+style(sgrBold, msg), a.width)
 	}
 	if a.currentFile != "" {
 		fn := filepath.Base(a.currentFile)
-		fileTag := style(sgrReverseVideo, " "+fn+" ")
-		return fitDisplay(fileTag+" "+style(sgrBold, msg), a.width)
+		tag := a.fileTag(fn)
+		return fitDisplay(tag+" "+style(sgrBold, msg), a.width)
 	}
 	return fitDisplay(style(sgrBold, msg), a.width)
 }

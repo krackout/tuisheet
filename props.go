@@ -101,7 +101,7 @@ func (a *app) handlePropertiesEditKey(msg tea.KeyMsg) tea.Cmd {
 		a.takeSnapshot("Edit properties")
 		a.docProps = a.propEditOrig
 		a.docPropsDirty = true
-		a.dirty = true
+		a.markDirty()
 		a.propertiesLines = a.buildPropertiesLines()
 		a.propertiesScroll = 0
 		a.mode = modeProperties
@@ -249,7 +249,7 @@ func readXlsxProperties(filename string) []string {
 	if err != nil {
 		return nil
 	}
-	defer zr.Close()
+	defer func() { _ = zr.Close() }()
 	files := make(map[string]*zip.File, len(zr.File))
 	for _, f := range zr.File {
 		files[f.Name] = f
@@ -522,12 +522,12 @@ func (a *app) withPropertiesEditPopup(lines []string) []string {
 	for row := boxY; row < boxY+boxH && row < len(lines); row++ {
 		i := row - boxY
 		var boxLine string
-		switch {
-		case i == 0:
+		switch i {
+		case 0:
 			tw := displayWidth(title)
 			dash := max(0, innerW-tw)
 			boxLine = "┌" + style(sgrReverseVideo, title) + strings.Repeat("─", dash) + "┐"
-		case i == boxH-1:
+		case boxH - 1:
 			boxLine = "└" + strings.Repeat("─", innerW) + "┘"
 		default:
 			ci := i - 1

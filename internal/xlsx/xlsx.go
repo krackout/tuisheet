@@ -6,9 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
-	"os"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -962,37 +960,4 @@ func extractPaneAttr(tag, name string) int {
 		return -1
 	}
 	return v
-}
-
-// readWorksheetFromBytes streams a worksheet part from raw XML bytes,
-// used by tests to exercise the parser without a full package.
-func readWorksheetFromBytes(data string) (*sheet.Sheet, error) {
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	w, err := zw.Create("xl/worksheets/sheet1.xml")
-	if err != nil {
-		return nil, err
-	}
-	if _, err := w.Write([]byte(data)); err != nil {
-		return nil, err
-	}
-	if err := zw.Close(); err != nil {
-		return nil, err
-	}
-	tmp, err := os.MkdirTemp("", "wsxlsx")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(tmp)
-	path := filepath.Join(tmp, "ws.xlsx")
-	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
-		return nil, err
-	}
-	zr, err := zip.OpenReader(path)
-	if err != nil {
-		return nil, err
-	}
-	defer zr.Close()
-	files := zipFiles(zr.File)
-	return readWorksheet(files, "xl/worksheets/sheet1.xml", []string{""}, nil)
 }

@@ -124,6 +124,9 @@ type app struct {
 	message           string
 	prompt            string
 	dirty             bool
+	stateID           uint64 // current workbook state version
+	savedStateID      uint64 // state version at last successful load/save
+	stateSeq          uint64 // last allocated state version
 	pendingAction     int
 	currentFile       string
 	width             int
@@ -221,6 +224,7 @@ type appSnapshot struct {
 	colWidth    int
 	docProps    xlsx.DocProps
 	docDirty    bool
+	stateID     uint64
 }
 
 type menuEntry struct {
@@ -261,11 +265,11 @@ message, with no frame timer, so idle CPU stays near zero.
 `
 
 func printHelp() {
-	fmt.Fprint(os.Stdout, strings.TrimPrefix(helpText, "\n"))
+	_, _ = fmt.Fprint(os.Stdout, strings.TrimPrefix(helpText, "\n"))
 }
 
 func printVersion() {
-	fmt.Fprintf(os.Stdout, "%s %s\n", buildinfo.AppName, buildinfo.AppVersion)
+	_, _ = fmt.Fprintf(os.Stdout, "%s %s\n", buildinfo.AppName, buildinfo.AppVersion)
 }
 
 type cliOptions struct {
@@ -300,7 +304,7 @@ func main() {
 	args := os.Args[1:]
 	cli, err := parseArgs(args)
 	if err != nil {
-		fmt.Fprintln(os.Stdout, err.Error())
+		_, _ = fmt.Fprintln(os.Stdout, err.Error())
 		printHelp()
 		os.Exit(1)
 		return
@@ -429,6 +433,9 @@ func (a *app) openXLSX(filename string) error {
 	a.gridCacheKey = ""
 	a.gridCache = nil
 	a.currentFile = filename
+	a.stateSeq++
+	a.stateID = a.stateSeq
+	a.savedStateID = a.stateID
 	a.dirty = false
 	if p, ok := xlsx.LoadDocProps(filename); ok {
 		a.docProps = p
@@ -680,7 +687,7 @@ func (a *app) handleEditKey(msg tea.KeyMsg) tea.Cmd {
 			a.takeSnapshot("Edit " + a.active.String())
 		}
 		a.sheet.SetUserInput(a.active, a.edit)
-		a.dirty = true
+		a.markDirty()
 		a.mode = modeNormal
 		a.message = "Stored " + a.active.String()
 		a.active.Row++
@@ -692,7 +699,7 @@ func (a *app) handleEditKey(msg tea.KeyMsg) tea.Cmd {
 			a.takeSnapshot("Edit " + a.active.String())
 		}
 		a.sheet.SetUserInput(a.active, a.edit)
-		a.dirty = true
+		a.markDirty()
 		a.mode = modeNormal
 		prev := a.active.String()
 		a.message = "Stored " + prev
@@ -830,7 +837,7 @@ func (a *app) handleRenameSheetKey(msg tea.KeyMsg) tea.Cmd {
 		old := a.sheetNames[a.activeSheet]
 		a.takeSnapshot("Rename sheet")
 		if old != name {
-			a.dirty = true
+			a.markDirty()
 		}
 		a.sheetNames[a.activeSheet] = name
 		if cur, ok := a.cursors[old]; ok {
@@ -1012,16 +1019,17 @@ func (a *app) handlePopupClick(x, y int) bool {
 	}
 	switch a.popupContext {
 	case 0:
-		if index == 0 {
+		switch index {
+		case 0:
 			a.takeSnapshot("Delete cells up")
 			a.sheet.DeleteCellShiftUp(a.active)
-		} else if index == 1 {
+		case 1:
 			a.takeSnapshot("Delete cells left")
 			a.sheet.DeleteCellShiftLeft(a.active)
-		} else {
+		default:
 			return true
 		}
-		a.dirty = true
+		a.markDirty()
 		a.mode = modeNormal
 		a.message = "Deleted"
 	case 1:
@@ -1029,22 +1037,22 @@ func (a *app) handlePopupClick(x, y int) bool {
 		case 0:
 			a.takeSnapshot("Insert row above")
 			a.sheet.InsertRow(a.active.Row)
-			a.dirty = true
+			a.markDirty()
 			a.message = fmt.Sprintf("Inserted row above %d", a.active.Row+1)
 		case 1:
 			a.takeSnapshot("Insert row below")
 			a.sheet.InsertRow(a.active.Row + 1)
-			a.dirty = true
+			a.markDirty()
 			a.message = fmt.Sprintf("Inserted row below %d", a.active.Row+1)
 		case 2:
 			a.takeSnapshot(fmt.Sprintf("Hide row %d", a.active.Row+1))
 			a.sheet.HideRow(a.active.Row)
-			a.dirty = true
+			a.markDirty()
 			a.message = fmt.Sprintf("Row %d hidden", a.active.Row+1)
 		case 3:
 			a.takeSnapshot("Delete row")
 			a.sheet.DeleteRow(a.active.Row)
-			a.dirty = true
+			a.markDirty()
 			a.message = "Deleted"
 		default:
 			return true
@@ -1064,14 +1072,14 @@ func (a *app) handlePopupClick(x, y int) bool {
 		case 2:
 			a.takeSnapshot("Insert column left")
 			a.sheet.InsertColumn(a.active.Col)
-			a.dirty = true
+			a.markDirty()
 			a.message = "Inserted column left of " + sheet.ColumnName(a.active.Col)
 			a.mode = modeNormal
 			return true
 		case 3:
 			a.takeSnapshot("Insert column right")
 			a.sheet.InsertColumn(a.active.Col + 1)
-			a.dirty = true
+			a.markDirty()
 			a.message = "Inserted column right of " + sheet.ColumnName(a.active.Col)
 			a.mode = modeNormal
 			return true
@@ -1086,7 +1094,7 @@ func (a *app) handlePopupClick(x, y int) bool {
 		default:
 			return true
 		}
-		a.dirty = true
+		a.markDirty()
 		a.mode = modeNormal
 	}
 	return true
@@ -1122,7 +1130,6 @@ func (a *app) handleUndoHistoryKey(msg tea.KeyMsg) tea.Cmd {
 					}
 					a.restoreSnapshot(&snap)
 					a.redoStack = a.redoStack[:snapIdx]
-					a.dirty = true
 					a.message = "Redo to: " + snap.comment
 				}
 			}
@@ -1139,7 +1146,6 @@ func (a *app) handleUndoHistoryKey(msg tea.KeyMsg) tea.Cmd {
 					}
 					a.restoreSnapshot(&snap)
 					a.undoStack = a.undoStack[:snapIdx]
-					a.dirty = true
 					a.message = "Undo to: " + snap.comment
 				}
 			}
@@ -1221,11 +1227,11 @@ func (a *app) handleColWidthKey(msg tea.KeyMsg) tea.Cmd {
 			for c := range a.sheet.GetAllColWidths() {
 				a.sheet.SetColWidth(c, w)
 			}
-			a.dirty = true
+			a.markDirty()
 			a.message = "All columns width set to " + strconv.Itoa(w)
 		} else {
 			a.sheet.SetColWidth(a.active.Col, w)
-			a.dirty = true
+			a.markDirty()
 			a.message = "Column " + sheet.ColumnName(a.active.Col) + " width set to " + strconv.Itoa(w)
 		}
 		a.colWidthGlobal = false
@@ -1258,7 +1264,7 @@ func (a *app) handleColHideKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		a.takeSnapshot("Hide column " + sheet.ColumnName(col))
 		a.sheet.HideCol(col)
-		a.dirty = true
+		a.markDirty()
 		a.message = "Column " + a.colHideInput + " hidden"
 		a.mode = modeNormal
 	case "backspace":
@@ -1287,7 +1293,7 @@ func (a *app) handleColDisplayKey(msg tea.KeyMsg) tea.Cmd {
 		}
 		a.takeSnapshot("Show column " + sheet.ColumnName(col))
 		a.sheet.ShowCol(col)
-		a.dirty = true
+		a.markDirty()
 		a.message = "Column " + a.colHideInput + " visible"
 		a.mode = modeNormal
 	case "backspace":
@@ -1357,7 +1363,7 @@ func (a *app) handleRowHideKey(msg tea.KeyMsg) tea.Cmd {
 		for r := start; r <= end; r++ {
 			a.sheet.HideRow(r)
 		}
-		a.dirty = true
+		a.markDirty()
 		a.message = fmt.Sprintf("Rows %s hidden", a.rowHideInput)
 		a.mode = modeNormal
 		a.rowHideInput = ""
@@ -1394,7 +1400,7 @@ func (a *app) handleRowDisplayKey(msg tea.KeyMsg) tea.Cmd {
 		for r := start; r <= end; r++ {
 			a.sheet.ShowRow(r)
 		}
-		a.dirty = true
+		a.markDirty()
 		a.message = fmt.Sprintf("Rows %s visible", a.rowHideInput)
 		a.mode = modeNormal
 		a.rowHideInput = ""
@@ -1431,7 +1437,7 @@ func (a *app) handleRowDeleteKey(msg tea.KeyMsg) tea.Cmd {
 		for r := end; r >= start; r-- {
 			a.sheet.DeleteRow(r)
 		}
-		a.dirty = true
+		a.markDirty()
 		a.message = fmt.Sprintf("Rows %s deleted", a.rowHideInput)
 		a.mode = modeNormal
 		a.rowHideInput = ""
@@ -1490,7 +1496,7 @@ func (a *app) handleSheetMoveKey(msg tea.KeyMsg) tea.Cmd {
 			}
 			if changed {
 				a.takeSnapshot("Move sheet")
-				a.dirty = true
+				a.markDirty()
 			}
 		}
 		a.sheetMoveOrigNames = nil
@@ -2032,17 +2038,18 @@ func (a *app) handleSortOptionsKey(msg tea.KeyMsg) tea.Cmd {
 			a.sortSecondaryAsc = !a.sortSecondaryAsc
 		}
 	case "backspace", "ctrl+h":
-		if a.sortFocus == 0 {
+		switch a.sortFocus {
+		case 0:
 			if len(a.sortPrimaryCol) > 0 {
 				a.sortPrimaryCol = a.sortPrimaryCol[:len(a.sortPrimaryCol)-1]
 			}
-		} else if a.sortFocus == 2 {
+		case 2:
 			if len(a.sortSecondaryCol) > 0 {
 				a.sortSecondaryCol = a.sortSecondaryCol[:len(a.sortSecondaryCol)-1]
 			}
-		} else if a.sortFocus == 1 {
+		case 1:
 			a.sortPrimaryAsc = !a.sortPrimaryAsc
-		} else if a.sortFocus == 3 {
+		case 3:
 			a.sortSecondaryAsc = !a.sortSecondaryAsc
 		}
 	case "left", "right":
@@ -2055,16 +2062,15 @@ func (a *app) handleSortOptionsKey(msg tea.KeyMsg) tea.Cmd {
 	default:
 		if len(msg.Runes) == 1 && unicode.IsLetter(msg.Runes[0]) {
 			ch := strings.ToUpper(string(msg.Runes[0]))
-			if a.sortFocus == 0 {
+			switch a.sortFocus {
+			case 0:
 				if len(a.sortPrimaryCol) < 3 {
 					a.sortPrimaryCol += ch
 				}
-			} else if a.sortFocus == 2 {
+			case 2:
 				if len(a.sortSecondaryCol) < 3 {
 					a.sortSecondaryCol += ch
 				}
-			} else if a.sortFocus == 1 {
-				// letter on order field toggles? ignore
 			}
 		}
 	}
@@ -2165,7 +2171,7 @@ func (a *app) doSort() {
 			a.sheet.SetStyle(c, cd.style)
 		}
 	}
-	a.dirty = true
+	a.markDirty()
 	a.mode = modeNormal
 	a.message = fmt.Sprintf("Sorted %s by %s", r.Start.String()+":"+r.End.String(), primary)
 	if secondary != "" {
@@ -2292,7 +2298,7 @@ func readZipFileBytes(f *zip.File) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 	return io.ReadAll(rc)
 }
 
@@ -2461,7 +2467,7 @@ func (a *app) doCopyMove(isMove bool) {
 			srcSheet.Unmerge(m.Start)
 		}
 	}
-	a.dirty = true
+	a.markDirty()
 	a.copyOp = ""
 	a.pendingCopyOp = ""
 	a.mode = modeNormal
@@ -2660,8 +2666,6 @@ func adjustFormulaForMoveRefs(formula string, src sheet.Range, dr, dc int, srcNa
 						continue
 					}
 				}
-			} else {
-				// already consumed quoted prefix, continue to cell parse
 			}
 			if i < len(formula) && (formula[i] == '$' || isColChar(formula[i])) {
 				start := i
@@ -2859,7 +2863,7 @@ func (a *app) applyRangePending() {
 		a.message = path + " (no action)"
 		return
 	}
-	a.dirty = true
+	a.markDirty()
 	a.message = path + " applied to " + r.Start.String() + ":" + r.End.String()
 }
 
@@ -2979,7 +2983,7 @@ func (a *app) deleteSheet(index int) {
 		deletedName = a.sheetNames[index]
 	}
 	a.takeSnapshot("Delete sheet")
-	a.dirty = true
+	a.markDirty()
 	a.saveLiveState()
 	a.sheets = append(a.sheets[:index], a.sheets[index+1:]...)
 	a.sheetNames = append(a.sheetNames[:index], a.sheetNames[index+1:]...)
@@ -3089,6 +3093,7 @@ func (a *app) saveXLSX(filename string) error {
 		err = xlsx.Save(filename, a.currentFile, a.sheets, a.sheetNames)
 	}
 	if err == nil {
+		a.savedStateID = a.stateID
 		a.dirty = false
 		if props != nil {
 			a.docPropsLoaded = true
@@ -3241,10 +3246,10 @@ func (a *app) withSortPopup(lines []string) []string {
 	for row := boxY; row < boxY+boxH && row < len(lines); row++ {
 		i := row - boxY
 		var boxLine string
-		switch {
-		case i == 0:
+		switch i {
+		case 0:
 			boxLine = "┌" + strings.Repeat("─", innerW) + "┐"
-		case i == boxH-1:
+		case boxH - 1:
 			boxLine = "└" + strings.Repeat("─", innerW) + "┘"
 		default:
 			ci := i - 1
@@ -3285,10 +3290,10 @@ func (a *app) withSheetMovePopup(lines []string) []string {
 	for row := boxY; row < boxY+boxH && row < len(lines); row++ {
 		i := row - boxY
 		var boxLine string
-		switch {
-		case i == 0:
+		switch i {
+		case 0:
 			boxLine = "┌" + strings.Repeat("─", innerW) + "┐"
-		case i == boxH-1:
+		case boxH - 1:
 			boxLine = "└" + strings.Repeat("─", innerW) + "┘"
 		default:
 			ci := i - 1

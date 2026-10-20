@@ -2393,11 +2393,10 @@ func wildcardRegex(pattern string) (*regexp.Regexp, bool) {
 	return re, true
 }
 
-// matchCriteria implements Excel criteria strings for the *IF family: an
+// parsedCriteria implements Excel criteria strings for the *IF family: an
 // optional operator prefix (>=, <=, <>, >, <, =), numeric or textual targets,
-// case-insensitive equality, and * / ? wildcards.
-// parsedCriteria is a criteria string parsed once so per-cell matching
-// avoids re-trimming, re-lowering and re-compiling on every cell.
+// case-insensitive equality, and * / ? wildcards. It is parsed once so
+// per-cell matching avoids re-trimming, re-lowering and re-compiling.
 type parsedCriteria struct {
 	op     string
 	num    float64
@@ -2466,10 +2465,6 @@ func matchParsedCriteria(v Value, pc parsedCriteria) bool {
 	default:
 		return text == pc.target
 	}
-}
-
-func matchCriteria(v Value, criteria string) bool {
-	return matchParsedCriteria(v, parseCriteria(criteria))
 }
 
 // criteriaArgText evaluates the criteria argument to its text form so that

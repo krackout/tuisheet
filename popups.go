@@ -108,14 +108,14 @@ func (a *app) withUndoHistoryPopup(lines []string) []string {
 	for row := boxY; row < boxY+boxH && row < len(lines); row++ {
 		i := row - boxY
 		var boxLine string
-		switch {
-		case i == 0:
+		switch i {
+		case 0:
 			dashCount := innerW - displayWidth(title)
 			if dashCount < 0 {
 				dashCount = 0
 			}
 			boxLine = "┌" + title + strings.Repeat("─", dashCount) + "┐"
-		case i == boxH-1:
+		case boxH - 1:
 			boxLine = "└" + strings.Repeat("─", innerW) + "┘"
 		default:
 			ci := i - 1
@@ -198,12 +198,12 @@ func (a *app) renderScrollablePopup(lines []string, title string, content []stri
 	for row := boxY; row < boxY+boxH && row < len(lines); row++ {
 		i := row - boxY
 		var boxLine string
-		switch {
-		case i == 0:
+		switch i {
+		case 0:
 			tw := displayWidth(title)
 			dash := max(0, innerW-tw)
 			boxLine = "┌" + style(sgrReverseVideo, title) + strings.Repeat("─", dash) + "┐"
-		case i == boxH-1:
+		case boxH - 1:
 			boxLine = "└" + strings.Repeat("─", innerW) + "┘"
 		default:
 			ci := i - 1
@@ -236,10 +236,10 @@ func (a *app) renderSimpleBox(lines []string, content []string) {
 	for row := boxY; row < boxY+boxH && row < len(lines); row++ {
 		i := row - boxY
 		var boxLine string
-		switch {
-		case i == 0:
+		switch i {
+		case 0:
 			boxLine = "┌" + strings.Repeat("─", innerW) + "┐"
-		case i == boxH-1:
+		case boxH - 1:
 			boxLine = "└" + strings.Repeat("─", innerW) + "┘"
 		default:
 			ci := i - 1
