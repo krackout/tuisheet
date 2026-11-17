@@ -33,8 +33,7 @@ func (a *app) selectSheetFromScreen(x, y int) bool {
 func (a *app) gridPageRows() int {
 	rows := max(1, a.height-a.gridTop()-2)
 	if a.viewMode == viewNormal && a.sheet != nil && a.sheet.IsFrozen() {
-		fr, _ := a.sheet.Freeze()
-		rows -= fr
+		rows -= len(a.frozenPane(a.sheet).rows)
 		if rows < 1 {
 			rows = 1
 		}
@@ -117,7 +116,19 @@ func (a *app) hitTest(x, y int) (sheetIdx int, row, col int, ok bool) {
 		row = rOff + inBand - 1
 
 	default:
-		row = rOff + y - gridTop - 1
+		s := a.sheets[sheetIdx]
+		fp := a.frozenPane(s)
+		gridRow := y - gridTop - 1
+		if gridRow < len(fp.rows) {
+			row = fp.rows[gridRow]
+		} else {
+			row = a.visibleRowAt(s, rOff, gridRow-len(fp.rows))
+		}
+		if x < rowHeaderWidth {
+			return sheetIdx, row, -1, true
+		}
+		col = a.screenXToColFrozen(s, cOff, fp, x)
+		return sheetIdx, row, col, true
 	}
 
 	if x < rowHeaderWidth {
@@ -234,9 +245,17 @@ func (a *app) selectFromScreen(x, y int) {
 	if sheetIdx != a.activeSheet {
 		a.setActiveSheetNoReset(sheetIdx)
 	}
-	a.active = sheet.Coord{Row: row, Col: col}
+	a.active = a.mergeAnchor(a.sheet, sheet.Coord{Row: row, Col: col})
 	a.ensureVisible()
 	a.closeOverlay()
+}
+
+// mergeAnchor returns the top-left cell of the merge containing c, if any.
+func (a *app) mergeAnchor(s *sheet.Sheet, c sheet.Coord) sheet.Coord {
+	if m, ok := s.MergeAt(c); ok {
+		return m.Start
+	}
+	return c
 }
 
 func (a *app) switchSheet(delta int) {
@@ -450,6 +469,60 @@ func (a *app) visibleRows(s *sheet.Sheet, rOff int, availRows int) []int {
 	return vr
 }
 
+// frozenPane describes the frozen band painted outside the scrollable grid.
+// Freeze() returns split indexes: rows [0,fr) and columns [0,fc) are frozen,
+// with hidden entries excluded. Sharing this layout keeps painting and mouse
+// hit testing in agreement.
+type frozenPane struct {
+	rows  []int
+	cols  []int
+	width int
+}
+
+func (a *app) frozenPane(s *sheet.Sheet) frozenPane {
+	if s == nil {
+		return frozenPane{}
+	}
+	fr, fc := s.Freeze()
+	if fr == 0 && fc == 0 {
+		return frozenPane{}
+	}
+	p := frozenPane{
+		rows: make([]int, 0, min(fr, 16)),
+		cols: make([]int, 0, min(fc, 16)),
+	}
+	for r := 0; r < fr && r < sheet.MaxRows; r++ {
+		if !s.IsRowHidden(r) {
+			p.rows = append(p.rows, r)
+		}
+	}
+	for c := 0; c < fc && c < sheet.MaxColumns; c++ {
+		if !s.IsColHidden(c) {
+			p.cols = append(p.cols, c)
+			p.width += a.colW(s, c)
+		}
+	}
+	return p
+}
+
+// visibleRowAt returns the nth visible row at or after start.
+func (a *app) visibleRowAt(s *sheet.Sheet, start, n int) int {
+	row := start
+	for row < sheet.MaxRows {
+		if !s.IsRowHidden(row) {
+			if n == 0 {
+				return row
+			}
+			n--
+		}
+		row++
+	}
+	if row > 0 {
+		return row - 1
+	}
+	return 0
+}
+
 // colWidthVC returns the on-screen width of vc[ci]: the truncated partialW
 // for the trailing partial column, else the full column width.
 func (a *app) colWidthVC(s *sheet.Sheet, vc []int, ci, partialW int) int {
@@ -488,6 +561,31 @@ func (a *app) screenXToCol(s *sheet.Sheet, cOff int, x int) int {
 	return col - 1
 }
 
+// screenXToColFrozen maps x to a column, accounting for the frozen columns
+// painted to the left of the scrollable region.
+func (a *app) screenXToColFrozen(s *sheet.Sheet, cOff int, fp frozenPane, x int) int {
+	px := x - rowHeaderWidth
+	if px < 0 {
+		return cOff
+	}
+	if px < fp.width {
+		for _, col := range fp.cols {
+			w := a.colW(s, col)
+			if px < w {
+				return col
+			}
+			px -= w
+		}
+		return fp.cols[len(fp.cols)-1]
+	}
+	return a.screenXToCol(s, cOff, x-fp.width)
+}
+
+// colAtScreen maps a screen x in the normal grid to a sheet column.
+func (a *app) colAtScreen(x int) int {
+	return a.screenXToColFrozen(a.sheet, a.colOffset, a.frozenPane(a.sheet), x)
+}
+
 func (a *app) ensureVisible() {
 	var rows, px int
 	switch a.viewMode {
@@ -508,15 +606,12 @@ func (a *app) ensureVisible() {
 	// Freeze pane: keep offsets outside frozen area (only in normal view)
 	fr, fc := 0, 0
 	frozenW := 0
+	frozenH := 0
 	if a.viewMode == viewNormal && a.sheet != nil && a.sheet.IsFrozen() {
 		fr, fc = a.sheet.Freeze()
-		// compute frozen width for px budget
-		for c, cnt := 0, 0; cnt < fc && c < sheet.MaxColumns; c++ {
-			if !a.sheet.IsColHidden(c) {
-				frozenW += a.colW(a.sheet, c)
-				cnt++
-			}
-		}
+		fp := a.frozenPane(a.sheet)
+		frozenW = fp.width
+		frozenH = len(fp.rows)
 		if a.rowOffset < fr {
 			a.rowOffset = fr
 		}
@@ -529,13 +624,13 @@ func (a *app) ensureVisible() {
 	}
 	effectiveRows := rows
 	effectivePx := px
-	if fr > 0 {
-		effectiveRows = rows - fr
+	if frozenH > 0 {
+		effectiveRows = rows - frozenH
 		if effectiveRows < 1 {
 			effectiveRows = 1
 		}
 	}
-	if fc > 0 {
+	if frozenW > 0 {
 		effectivePx = px - frozenW
 		if effectivePx < 1 {
 			effectivePx = 1
@@ -1095,39 +1190,23 @@ func (a *app) gridLines() []string {
 	rows := max(1, a.height-a.gridTop()-2)
 	// Freeze handling: split into frozen + scrollable
 	if a.sheet != nil && a.sheet.IsFrozen() {
-		fr, fc := a.sheet.Freeze()
-		// frozen cols (first fc visible cols)
-		frozenCols := []int{}
-		for c := 0; len(frozenCols) < fc && c < sheet.MaxColumns; c++ {
-			if !a.sheet.IsColHidden(c) {
-				frozenCols = append(frozenCols, c)
-			}
-		}
-		frozenRows := []int{}
-		for r := 0; len(frozenRows) < fr && r < sheet.MaxRows; r++ {
-			if !a.sheet.IsRowHidden(r) {
-				frozenRows = append(frozenRows, r)
-			}
-		}
-		frozenW := 0
-		for _, c := range frozenCols {
-			frozenW += a.colW(a.sheet, c)
-		}
+		fp := a.frozenPane(a.sheet)
 		availW := max(1, a.width-rowHeaderWidth)
-		scrollW := availW - frozenW
+		scrollW := availW - fp.width
 		if scrollW < 1 {
 			scrollW = 1
 		}
 		scrollCols, partialW := a.visibleCols(a.sheet, a.colOffset, scrollW)
-		vc := make([]int, 0, len(frozenCols)+len(scrollCols))
-		vc = append(vc, frozenCols...)
+		vc := make([]int, 0, len(fp.cols)+len(scrollCols))
+		vc = append(vc, fp.cols...)
 		vc = append(vc, scrollCols...)
-		frozenH := len(frozenRows)
+		frozenH := len(fp.rows)
 		scrollH := rows - frozenH
 		if scrollH < 0 {
 			scrollH = 0
 		}
 		scrollRows := a.visibleRows(a.sheet, a.rowOffset, max(1, scrollH))
+		frozenRows := fp.rows
 		// if scrollRows empty due to offset, still show frozen
 		if frozenH > rows {
 			frozenRows = frozenRows[:rows]
@@ -1152,46 +1231,7 @@ func (a *app) gridLines() []string {
 			vrAll = vrAll[:rows]
 		}
 		for _, row := range vrAll {
-			var line strings.Builder
-			line.Grow(a.width + 32)
-			rowHeader := fmt.Sprintf("%*d ", rowHeaderWidth-1, row+1)
-			if row == a.active.Row {
-				line.WriteString(style(sgrBlueBand, rowHeader))
-			} else {
-				line.WriteString(style(sgrTealBand, rowHeader))
-			}
-			for ci, col := range vc {
-				cell := sheet.Coord{Row: row, Col: col}
-				if a.sheet.CoveredByMerge(cell) {
-					line.WriteString(fit("", a.colWidthVC(a.sheet, vc, ci, partialW)))
-					continue
-				}
-				width := a.colWidthVC(a.sheet, vc, ci, partialW)
-				// merged width across vc (handle span within combined vc)
-				if m, ok := a.sheet.MergeAt(cell); ok && m.Start == cell {
-					span := 0
-					for k := ci; k < len(vc); k++ {
-						if vc[k] >= m.Start.Col && vc[k] <= m.End.Col {
-							span++
-						} else if vc[k] > m.End.Col {
-							break
-						}
-					}
-					if span > 1 {
-						width = a.spanWidthVC(a.sheet, vc, ci, span, partialW)
-					}
-				}
-				cellStyle := a.sheet.Style(cell)
-				value := alignText(a.sheet.Display(cell), width, cellStyle.Align)
-				if cell == a.active {
-					line.WriteString(activeCell(value, cellStyle))
-				} else if a.isInRangeSelection(cell) || a.isInCopyDestPreview(cell) {
-					line.WriteString(style(sgrTealBand, value))
-				} else {
-					line.WriteString(styledCell(value, cellStyle))
-				}
-			}
-			lines = append(lines, line.String())
+			lines = append(lines, a.gridRowLine(row, vc, partialW))
 		}
 		if cacheKey != "" {
 			a.gridCacheKey = cacheKey
@@ -1214,38 +1254,8 @@ func (a *app) gridLines() []string {
 	}
 	lines = append(lines, fitDisplay(header.String(), a.width))
 
-	for r := 0; r < len(vr); r++ {
-		row := vr[r]
-		var line strings.Builder
-		line.Grow(a.width + 32)
-		rowHeader := fmt.Sprintf("%*d ", rowHeaderWidth-1, row+1)
-		if row == a.active.Row {
-			line.WriteString(style(sgrBlueBand, rowHeader))
-		} else {
-			line.WriteString(style(sgrTealBand, rowHeader))
-		}
-		for ci := 0; ci < len(vc); ci++ {
-			col := vc[ci]
-			cell := sheet.Coord{Row: row, Col: col}
-			if a.sheet.CoveredByMerge(cell) {
-				if merge, ok := a.sheet.MergeAt(cell); ok && merge.Start.Row == row && merge.Start.Col >= a.colOffset {
-					continue
-				}
-				line.WriteString(fit("", a.colWidthVC(a.sheet, vc, ci, partialW)))
-				continue
-			}
-			width := a.cellDisplayWidth(cell, vc, ci, partialW)
-			cellStyle := a.sheet.Style(cell)
-			value := alignText(a.sheet.Display(cell), width, cellStyle.Align)
-			if cell == a.active {
-				line.WriteString(activeCell(value, cellStyle))
-			} else if a.isInRangeSelection(cell) || a.isInCopyDestPreview(cell) {
-				line.WriteString(style(sgrTealBand, value))
-			} else {
-				line.WriteString(styledCell(value, cellStyle))
-			}
-		}
-		lines = append(lines, line.String())
+	for _, row := range vr {
+		lines = append(lines, a.gridRowLine(row, vc, partialW))
 	}
 	if cacheKey != "" {
 		a.gridCacheKey = cacheKey
@@ -1473,12 +1483,68 @@ func (a *app) verticalLines() []string {
 	return lines
 }
 
+// gridRowLine renders one data row for the normal grid. The frozen and
+// scrolling layouts share it so painted columns and mouse hit testing cannot
+// drift apart.
+func (a *app) gridRowLine(row int, vc []int, partialW int) string {
+	var line strings.Builder
+	line.Grow(a.width + 32)
+	rowHeader := fmt.Sprintf("%*d ", rowHeaderWidth-1, row+1)
+	if row == a.active.Row {
+		line.WriteString(style(sgrBlueBand, rowHeader))
+	} else {
+		line.WriteString(style(sgrTealBand, rowHeader))
+	}
+	for ci, col := range vc {
+		cell := sheet.Coord{Row: row, Col: col}
+		if a.sheet.CoveredByMerge(cell) {
+			if a.mergeAnchorRenderedBefore(cell, vc, ci) {
+				continue
+			}
+			line.WriteString(fit("", a.colWidthVC(a.sheet, vc, ci, partialW)))
+			continue
+		}
+		width := a.cellDisplayWidth(cell, vc, ci, partialW)
+		cellStyle := a.sheet.Style(cell)
+		value := alignText(a.sheet.Display(cell), width, cellStyle.Align)
+		if cell == a.active {
+			line.WriteString(activeCell(value, cellStyle))
+		} else if a.isInRangeSelection(cell) || a.isInCopyDestPreview(cell) {
+			line.WriteString(style(sgrTealBand, value))
+		} else {
+			line.WriteString(styledCell(value, cellStyle))
+		}
+	}
+	return line.String()
+}
+
+// mergeAnchorRenderedBefore reports whether cell belongs to a merge whose
+// anchor already painted this cell's width earlier in vc. Writing a blank for
+// such a covered cell would shift every following column to the right.
+func (a *app) mergeAnchorRenderedBefore(cell sheet.Coord, vc []int, ci int) bool {
+	m, ok := a.sheet.MergeAt(cell)
+	if !ok || m.Start.Row != cell.Row {
+		return false
+	}
+	for k := 0; k < ci; k++ {
+		if vc[k] == m.Start.Col {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *app) cellDisplayWidth(cell sheet.Coord, vc []int, ci, partialW int) int {
 	merge, ok := a.sheet.MergeAt(cell)
-	if !ok || merge.Start != cell || merge.Start.Row != cell.Row {
+	if !ok || merge.Start != cell {
 		return a.colWidthVC(a.sheet, vc, ci, partialW)
 	}
-	span := min(merge.ColSpan(), len(vc)-ci)
+	// Count only visible columns in the merge: hidden columns inside the
+	// span have no on-screen width to add.
+	span := 0
+	for k := ci; k < len(vc) && vc[k] <= merge.End.Col; k++ {
+		span++
+	}
 	return a.spanWidthVC(a.sheet, vc, ci, span, partialW)
 }
 

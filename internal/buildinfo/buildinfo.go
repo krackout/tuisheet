@@ -1,4 +1,4 @@
 package buildinfo
 
 const AppName = "tuisheet"
-const AppVersion = "1.0092"
+const AppVersion = "1.0098"

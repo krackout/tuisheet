@@ -342,16 +342,21 @@ func main() {
 	}
 	model = m
 	opts = append(opts, tea.WithoutRenderer())
+	p := tea.NewProgram(model, opts...)
+	r.setWriteErrorHandler(func(error) { p.Quit() })
 	r.start()
 	defer r.stop()
-	p := tea.NewProgram(model, opts...)
 	r.watchResize(p)
-	if _, err := p.Run(); err != nil {
-		// Restore the terminal explicitly: os.Exit skips the deferred
-		// stop, which would leave alt-screen, raw mode and hidden
-		// cursor behind.
-		r.stop()
-		fmt.Fprintf(os.Stderr, "tuisheet: %v\n", err)
+	_, runErr := p.Run()
+	// Stop before inspecting errors: this joins the worker and records any
+	// failure from its final frame. The deferred call is a no-op then.
+	r.stop()
+	if werr := r.writeErr(); werr != nil {
+		fmt.Fprintf(os.Stderr, "tuisheet: terminal output failed: %v\n", werr)
+		os.Exit(1)
+	}
+	if runErr != nil {
+		fmt.Fprintf(os.Stderr, "tuisheet: %v\n", runErr)
 		os.Exit(1)
 	}
 }
@@ -894,7 +899,7 @@ func (a *app) handleMouse(msg tea.MouseEvent) {
 			// Column header
 			a.popupContext = 2
 			a.message = "Right-click column"
-			gC := a.screenXToCol(a.sheet, a.colOffset, msg.X)
+			gC := a.colAtScreen(msg.X)
 			if gC >= 0 {
 				a.active.Col = gC
 			}
@@ -915,7 +920,7 @@ func (a *app) handleMouse(msg tea.MouseEvent) {
 			}
 			a.popupContext = 0
 			a.message = "Right-click menu: Delete cells"
-			a.active = sheet.Coord{Row: row, Col: col}
+			a.active = a.mergeAnchor(a.sheet, sheet.Coord{Row: row, Col: col})
 			a.ensureVisible()
 		} else {
 			return

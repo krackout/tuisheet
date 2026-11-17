@@ -46,11 +46,13 @@ type rawPainter struct {
 	wake          chan struct{}
 	wg            sync.WaitGroup
 
-	mu          sync.Mutex
-	latest      string
-	pending     bool
-	stopped     bool
-	lastWritten string
+	mu           sync.Mutex
+	latest       string
+	pending      bool
+	stopped      bool
+	lastWritten  string
+	writeFailure error       // first write error, reported by main
+	onWriteError func(error) // quits the program after a write failure
 }
 
 // resolveConsoleFd reports the fd to use for raw console input, or false
@@ -119,8 +121,9 @@ func (p *rawPainter) start() {
 	go p.run()
 }
 
-// run is the sole terminal writer. It exits on done; stop() joins it
-// before emitting teardown sequences, so no frame can land after them.
+// run is the sole terminal writer. It exits on done or on the first frame
+// write error; stop() joins it before emitting teardown sequences, so no
+// frame can land after them.
 func (p *rawPainter) run() {
 	defer p.wg.Done()
 	for {
@@ -132,7 +135,10 @@ func (p *rawPainter) run() {
 			frame := p.latest
 			p.pending = false
 			p.mu.Unlock()
-			p.writeFrame(frame)
+			if err := p.writeFrame(frame); err != nil {
+				p.failWrite(err)
+				return
+			}
 		}
 	}
 }
@@ -154,7 +160,9 @@ func (p *rawPainter) stop() {
 	p.pending = false
 	p.mu.Unlock()
 	if pending {
-		p.writeFrame(frame)
+		if err := p.writeFrame(frame); err != nil {
+			p.recordWriteError(err)
+		}
 	}
 	_, _ = io.WriteString(p.w, "\x1b[?1002l\x1b[?1006l\x1b[?2004l\x1b[?25h\x1b[?1049l")
 	if p.restoreOutput != nil {
@@ -189,15 +197,16 @@ func (p *rawPainter) submit(frame string) {
 }
 
 // writeFrame emits one frame, skipping it when identical to the last
-// written one. Must only be called from the worker or stop (post-join),
-// the two places that can prove no other write is in flight.
-func (p *rawPainter) writeFrame(frame string) {
+// successfully written one. A failed or short write is returned and leaves
+// the frame eligible for retry instead of suppressing it. Must only be
+// called from the worker or stop (post-join), the two places that can prove
+// no other write is in flight.
+func (p *rawPainter) writeFrame(frame string) error {
 	p.mu.Lock()
 	if frame == p.lastWritten {
 		p.mu.Unlock()
-		return
+		return nil
 	}
-	p.lastWritten = frame
 	p.mu.Unlock()
 
 	// In-place rewrite from home: View always covers the full screen
@@ -215,7 +224,55 @@ func (p *rawPainter) writeFrame(frame string) {
 		}
 	}
 	b.WriteString("\x1b[?2026l")
-	_, _ = io.WriteString(p.w, b.String())
+	payload := b.String()
+	n, err := io.WriteString(p.w, payload)
+	if err == nil && n != len(payload) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		return fmt.Errorf("frame write (%d/%d bytes): %w", n, len(payload), err)
+	}
+	// Mark the frame written only after the full payload landed, so a
+	// retry after failure is not suppressed as identical.
+	p.mu.Lock()
+	p.lastWritten = frame
+	p.mu.Unlock()
+	return nil
+}
+
+// setWriteErrorHandler installs fn to run when a frame write fails. It is
+// called from the worker, so it must not block indefinitely.
+func (p *rawPainter) setWriteErrorHandler(fn func(error)) {
+	p.mu.Lock()
+	p.onWriteError = fn
+	p.mu.Unlock()
+}
+
+// writeErr returns the first frame write failure, if any.
+func (p *rawPainter) writeErr() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.writeFailure
+}
+
+// recordWriteError keeps the first write failure for main to report.
+func (p *rawPainter) recordWriteError(err error) {
+	p.mu.Lock()
+	if p.writeFailure == nil {
+		p.writeFailure = err
+	}
+	p.mu.Unlock()
+}
+
+// failWrite records err and wakes the program so it can quit cleanly.
+func (p *rawPainter) failWrite(err error) {
+	p.recordWriteError(err)
+	p.mu.Lock()
+	fn := p.onWriteError
+	p.mu.Unlock()
+	if fn != nil {
+		fn(err)
+	}
 }
 
 // paintModel wraps the real model: after every Update it paints the fresh
